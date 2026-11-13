@@ -40,8 +40,11 @@ struct LyricsInfo
 class LyricsDocument
 {
 public:
-    /** 解析文本。fallbackInterval 用于无时间戳的纯文本歌词（每句秒数）。 */
-    LyricsInfo loadText (const juce::String& rawText, double fallbackInterval = 4.0);
+    /** 解析文本。fallbackInterval 用于无时间戳的纯文本歌词（每句秒数）。
+     *  language 只影响解析警告文案：0 = 中文, 1 = English。
+     */
+    LyricsInfo loadText (const juce::String& rawText, double fallbackInterval = 4.0,
+                         int language = 0);
 
     void clear();
 

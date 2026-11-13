@@ -37,7 +37,8 @@ JUCE 的 `AudioPlayHead::getPosition()` 在 VST3 下读的正是 Steinberg `Proc
 | 编码 | UTF-8 / UTF-16 LE / GBK(GB18030) 自动识别（国内老 LRC 常见 GBK） |
 | 微调 | 整体偏移 ±100 ms、归零；LRC 内 `[offset:]` 自动生效；字号滑块 |
 | 手动预览 | 内置模拟播放头，可在没有宿主时间码时校对歌词、拖动定位 |
-| 状态保存 | 歌词全文、偏移、字号、主题、窗口尺寸随宿主工程一起保存 |
+| 状态保存 | 歌词全文、偏移、字号、主题、**界面语言**、窗口尺寸随宿主工程一起保存 |
+| 界面语言 | 右上角下拉框切换 **中文 / English**：按钮、提示、状态、解析警告、内置示例歌词全部同步切换；已载入的用户歌词保持原样 |
 | 外观 | 深/浅两套主题，窗口自由缩放 |
 | 附带 | Standalone 独立程序（不上 DAW 也能当提词器用） |
 
@@ -120,8 +121,9 @@ cmake --build build --config Release --parallel
 2. 在 DAW 里重新扫描插件，按 `LyricSync` 搜索（Cubase / Nuendo / REAPER / Studio One / FL Studio / Ableton Live 等均可）。
 3. **插在有人声音频的轨道、总线或 Master 上**（插件需要被宿主调用 `process` 才能拿到时间码；音频完全直通，不会改变声音）。
 4. 打开插件窗口：默认带一段示例歌词。点「载入歌词」或直接把 `.lrc` 拖进窗口。
-5. 播放 → 当前句高亮；**任意拖动播放头 / 循环 / 回退 → 歌词立即对齐**。
-6. 若整体早了或晚了，用底部 `− / +` 每次微调 100 ms（正值＝歌词提前）。
+5. **界面语言**：右上角下拉框选 `中文` 或 `English`，按钮、提示、状态栏、警告与内置示例歌词会立即切换；设置随工程保存。切换语言**不会改动你自己载入的歌词文件**。
+6. 播放 → 当前句高亮；**任意拖动播放头 / 循环 / 回退 → 歌词立即对齐**。
+7. 若整体早了或晚了，用底部 `− / +` 每次微调 100 ms（正值＝歌词提前）。
 
 ### 独立程序（Standalone）
 
@@ -166,8 +168,14 @@ cmake --build build --config Release --parallel
 **Q：变速 / 变拍工程？**
 歌词按宿主项目时间（秒）对齐，与 LRC 的绝对时间戳一致。若工程做过整体变速导致音频与原始歌词时间轴不同，请用偏移微调，或重新导出与工程一致的 LRC。
 
-**Q：中文乱码？**
-文件支持 UTF-8、UTF-16 LE、GBK 自动识别；若仍异常，用记事本另存为 UTF-8 再载入。
+**Q：界面文字全是 `æ¯å…` 之类的乱码？**
+这是 1.0.0 早期构建的已知问题，已修复。根因不是字体、也不是系统区域设置：JUCE 的 `juce::String (const char*)` **只接受纯 ASCII**，源码里的中文 UTF-8 字节被逐字节当成单个字符，于是显示成乱码（二进制里的字节其实是对的）。现在所有界面文案统一由 `Lang::tr()` 经 `juce::String::fromUTF8()` 解码，并且 `Source/I18n.cpp` 是**纯 ASCII 的 UTF-8 转义源码**（由 `tools/gen_i18n.py` 生成），彻底不依赖编译器代码页。请重新下载新版 `.vst3` 覆盖安装。
+
+**Q：载入的歌词文件乱码？**
+文件支持 UTF-8、UTF-16 LE、GBK(GB18030) 自动识别；若仍异常，用记事本另存为 UTF-8 再载入。界面语言切换只影响插件自带文案，不会转码你载入的歌词。
+
+**Q：想改界面文案 / 加第三种语言？**
+编辑 `tools/gen_i18n.py` 里的 `TABLE`（key、中文、英文）和 `DEMO_ZH / DEMO_EN`，运行 `python tools/gen_i18n.py` 会重新生成 `Source/I18n.h` 与 `Source/I18n.cpp`，然后重新构建即可。
 
 **Q：换电脑 / 重新打开工程歌词还在吗？**
 在。歌词全文通过 `getStateInformation` 写进宿主工程。
@@ -181,8 +189,10 @@ Source/
   PluginProcessor.h/.cpp   插件主体：读宿主播放头、直通音频、工程状态保存
   PluginEditor.h/.cpp      界面：三行歌词、逐字高亮、控件、拖放、手动预览
   LyricsDocument.h/.cpp    LRC/增强LRC/SRT/TXT 解析 + 二分查找
+  I18n.h/.cpp              中/英双语字符串表（自动生成，纯 ASCII UTF-8 转义）
   UiPalette.h              深/浅配色
-  DemoLyrics.h             内置示例歌词
+  DemoLyrics.h             内置示例歌词（按当前语言取用）
+tools/gen_i18n.py          双语文案生成器：改文案后运行它再重新构建
 CMakeLists.txt             JUCE CMake 工程（VST3 + Standalone）
 build-windows.bat          一键构建
 examples/                  示例歌词

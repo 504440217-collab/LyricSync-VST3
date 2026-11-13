@@ -1,4 +1,5 @@
 #include "LyricsDocument.h"
+#include "I18n.h"
 
 #include <algorithm>
 #include <cmath>
@@ -230,7 +231,8 @@ void LyricsDocument::finish (juce::String format, bool plainFallback, juce::Stri
             ++lastInfo.karaokeLines;
 }
 
-LyricsInfo LyricsDocument::loadText (const juce::String& rawText, double fallbackInterval)
+LyricsInfo LyricsDocument::loadText (const juce::String& rawText, double fallbackInterval,
+                                     int language)
 {
     clear();
 
@@ -393,9 +395,9 @@ LyricsInfo LyricsDocument::loadText (const juce::String& rawText, double fallbac
 
         lastInfo = meta;
         finish ("TXT", false);
-        lastInfo.warning = TRANS ("未检测到时间戳，已按每句 ")
+        lastInfo.warning = Lang::tr (Lang::TextId::warnNoTimestamps1, language)
                          + juce::String (gap, 1)
-                         + TRANS (" 秒自动排布；建议改用带时间戳的 LRC 文件。");
+                         + Lang::tr (Lang::TextId::warnNoTimestamps2, language);
         lastInfo.plainTextFallback = true;
         return lastInfo;
     }
@@ -439,8 +441,9 @@ LyricsInfo LyricsDocument::loadText (const juce::String& rawText, double fallbac
     juce::String warning;
 
     if (! lines.empty() && lines.front().time > 5.0)
-        warning = TRANS ("第一句在 ") + juce::String (lines.front().time, 1)
-                + TRANS (" 秒之后，若歌词整体错位请检查「偏移」或 LRC 的 [offset:] 标签。");
+        warning = Lang::tr (Lang::TextId::warnFirstLine1, language)
+                + juce::String (lines.front().time, 1)
+                + Lang::tr (Lang::TextId::warnFirstLine2, language);
 
     finish (format, false, warning);
     return lastInfo;

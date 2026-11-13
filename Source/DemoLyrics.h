@@ -1,26 +1,9 @@
 #pragma once
 
-#include <juce_core/juce_core.h>
+#include "I18n.h"
 
-/** 插件首次打开时展示的演示歌词，方便立刻看到排版效果。 */
-inline juce::String demoLyricsText()
+/** Built-in demonstration lyrics. Text lives in I18n.cpp as UTF-8 escapes. */
+inline juce::String demoLyricsText (int language = 0)
 {
-    return juce::String (R"LRC([ti:LyricSync 演示歌词]
-[ar:Muzi Audio Tools]
-[00:00.00]LyricSync · 歌词同步显示
-[00:04.00]把 .lrc 文件拖进窗口就能开始
-[00:08.50]播放头跳到哪里
-[00:12.00]歌词就跟到哪里
-[00:15.50]停止、倒退、循环都不会错位
-[00:20.00]因为它读的是宿主的项目时间
-[00:24.50]而不是插件自己的计时器
-[00:29.00]试试把播放头拖到 00:40
-[00:33.00]看看下一句会不会立刻出现
-[00:37.00]再跳回 00:12 也没问题
-[00:40.00]你跳到了 40 秒，这一句应该已经亮起
-[00:45.00]在下方可以微调整体偏移
-[00:50.00]也可以粘贴自己的歌词文本
-[00:55.00]支持 LRC / 逐字 LRC / SRT / 纯文本
-[01:00.00]祝录音顺利
-)LRC");
+    return Lang::demoLyrics (language);
 }

@@ -49,7 +49,8 @@ target_sources(LyricSync
     PRIVATE
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
-        Source/LyricsDocument.cpp)
+        Source/LyricsDocument.cpp
+        Source/I18n.cpp)
 
 target_compile_definitions(LyricSync
     PUBLIC

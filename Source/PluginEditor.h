@@ -2,22 +2,24 @@
 
 #include "PluginProcessor.h"
 #include "UiPalette.h"
+#include "I18n.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
 //==============================================================================
 /**
- *  插件界面。
+ *  Plugin UI. All localised text is supplied by Lang::tr() in applyUiText(),
+ *  so the constructor never embeds non-ASCII literals in a juce::String.
  *
- *  界面自己不推进时间：每帧只读取处理器从宿主播放头拿到的绝对时间，
- *  再对歌词文档做一次二分查找，所以随机拖动播放头与连续播放走的是
- *  完全相同的代码路径。
+ *  The editor never advances time itself: every frame reads the host's
+ *  absolute project time and binary-searches the lyrics document.
  */
 class LyricSyncEditor : public juce::AudioProcessorEditor,
                         private juce::Timer,
                         public  juce::FileDragAndDropTarget,
                         private juce::Button::Listener,
-                        private juce::Slider::Listener
+                        private juce::Slider::Listener,
+                        private juce::ComboBox::Listener
 {
 public:
     explicit LyricSyncEditor (LyricSyncProcessor& owner);
@@ -33,8 +35,9 @@ private:
     void timerCallback() override;
     void buttonClicked (juce::Button* button) override;
     void sliderValueChanged (juce::Slider* slider) override;
+    void comboBoxChanged (juce::ComboBox* box) override;
 
-    //---- 绘制 ---------------------------------------------------------------
+    //---- Painting -----------------------------------------------------------
     void paintHeader (juce::Graphics& g, juce::Rectangle<float> area);
     void paintStage  (juce::Graphics& g, juce::Rectangle<float> area);
     void paintFooter (juce::Graphics& g, juce::Rectangle<float> area);
@@ -43,13 +46,16 @@ private:
                       bool bold, int sungChars = -1,
                       juce::Colour sungColour = {}, float alpha = 1.0f);
 
-    //---- 交互 ---------------------------------------------------------------
+    //---- Interaction --------------------------------------------------------
     void openFileDialog();
     void loadLyricsFile (const juce::File& file);
-    void loadLyricsText (const juce::String& text, const juce::String& label);
+    void loadLyricsText (const juce::String& text, const juce::String& label,
+                         bool isDemo = false);
     void enterEditMode();
     void leaveEditMode (bool apply);
     void setTheme (int index);
+    void setLanguage (int next);
+    void applyUiText (bool reloadDemoLyrics);
     void refreshLookAndFeel();
     void syncControlsFromSettings();
     void updateEditingVisibility();
@@ -59,7 +65,10 @@ private:
     juce::String timecodeText (double t) const;
     juce::String barBeatText() const;
 
-    //---- 数据 ---------------------------------------------------------------
+    juce::String tr (Lang::TextId id) const { return Lang::tr (id, language); }
+    juce::String sep() const                { return tr (Lang::TextId::separator); }
+
+    //---- Data ---------------------------------------------------------------
     LyricSyncProcessor& processor;
 
     UiPalette palette;
@@ -69,34 +78,38 @@ private:
     double offsetMs      = 0.0;
     double fontScale     = 1.0;
     int    themeIndex    = 0;
+    int    language      = 0;              // 0 = Chinese, 1 = English
     int    currentIndex  = -2;
     float  transition    = 1.0f;
 
-    bool   editing       = false;
-    bool   demoMode      = false;
-    bool   demoPlaying   = false;
-    double demoTime      = 0.0;
-    double lastTickMs    = 0.0;
+    bool   editing         = false;
+    bool   demoMode        = false;
+    bool   demoPlaying     = false;
+    bool   usingDemoLyrics = true;
+    bool   updatingLanguageBox = false;
+    double demoTime        = 0.0;
+    double lastTickMs      = 0.0;
 
     juce::uint32 lastTimeUpdates = 0;
     double lastHostUpdateMs      = 0.0;
     juce::String lastWarning;
     juce::String fileDescription;
 
-    //---- 控件 ---------------------------------------------------------------
-    juce::TextButton  loadButton       { "载入歌词" };
-    juce::TextButton  pasteButton      { "粘贴 / 编辑" };
-    juce::TextButton  demoButton       { "示例歌词" };
-    juce::TextButton  themeButton      { "浅色" };
-    juce::TextButton  minusButton      { "−" };
+    //---- Widgets. Texts are assigned in applyUiText(). ----------------------
+    juce::TextButton  loadButton;
+    juce::TextButton  pasteButton;
+    juce::TextButton  demoButton;
+    juce::TextButton  themeButton;
+    juce::ComboBox    languageBox;        // 中文 / English
+    juce::TextButton  minusButton;
     juce::TextButton  plusButton       { "+" };
-    juce::TextButton  resetButton      { "归零" };
-    juce::TextButton  demoPlayButton   { "▶" };
-    juce::TextButton  demoStopButton   { "■" };
-    juce::TextButton  applyTextButton  { "应用歌词" };
-    juce::TextButton  cancelTextButton { "取消" };
+    juce::TextButton  resetButton;
+    juce::TextButton  demoPlayButton;
+    juce::TextButton  demoStopButton;
+    juce::TextButton  applyTextButton;
+    juce::TextButton  cancelTextButton;
 
-    juce::ToggleButton demoClockToggle { "手动预览" };
+    juce::ToggleButton demoClockToggle;
 
     juce::Slider seekSlider  { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
     juce::Slider fontSlider  { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };

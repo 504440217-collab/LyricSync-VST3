@@ -17,8 +17,10 @@ LyricSyncProcessor::LyricSyncProcessor()
     setSetting (Settings::windowW,    960);
     setSetting (Settings::windowH,    600);
     setSetting (Settings::demoClock,  false);
+    setSetting (Settings::language,   0);
+    setSetting (Settings::stateVersion, 2);
 
-    document.loadText (demoLyricsText());
+    document.loadText (demoLyricsText (0));
 }
 
 //==============================================================================
@@ -171,6 +173,23 @@ void LyricSyncProcessor::setStateInformation (const void* data, int sizeInBytes)
 
         if (loaded.isValid() && loaded.hasType ("LyricSync"))
         {
+            // v1 built the demo lyrics with the ASCII-only String constructor,
+            // so saved demo text was mojibake. Replace ONLY the built-in demo;
+            // user-supplied lyrics are left untouched.
+            if (static_cast<int> (loaded.getProperty (Settings::stateVersion, 1)) < 2)
+            {
+                const auto saved = loaded.getProperty (Settings::lyricsText, "").toString();
+
+                if (saved.startsWith ("[ti:LyricSync"))
+                {
+                    const int lang = juce::jlimit (0, 1,
+                        static_cast<int> (loaded.getProperty (Settings::language, 0)));
+                    loaded.setProperty (Settings::lyricsText, demoLyricsText (lang), nullptr);
+                }
+            }
+
+            loaded.setProperty (Settings::stateVersion, 2, nullptr);
+
             {
                 const juce::ScopedLock sl (settingsLock);
                 settings = loaded;
@@ -182,9 +201,11 @@ void LyricSyncProcessor::setStateInformation (const void* data, int sizeInBytes)
     }
 }
 
-LyricsInfo LyricSyncProcessor::setLyricsText (const juce::String& text, const juce::String& path)
+LyricsInfo LyricSyncProcessor::setLyricsText (const juce::String& text,
+                                               const juce::String& path,
+                                               int language)
 {
-    const auto info = document.loadText (text);
+    const auto info = document.loadText (text, 4.0, language);
 
     {
         const juce::ScopedLock sl (settingsLock);
@@ -197,16 +218,17 @@ LyricsInfo LyricSyncProcessor::setLyricsText (const juce::String& text, const ju
     return info;
 }
 
-void LyricSyncProcessor::reloadFromSettings()
+void LyricSyncProcessor::reloadFromSettings (int language)
 {
     juce::String text;
 
     {
         const juce::ScopedLock sl (settingsLock);
-        text = settings.getProperty (Settings::lyricsText, demoLyricsText()).toString();
+        text = settings.getProperty (Settings::lyricsText,
+                                     demoLyricsText (language)).toString();
     }
 
-    document.loadText (text);
+    document.loadText (text, 4.0, language);
     stateReloadPending.store (false);
 }
 

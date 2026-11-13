@@ -19,6 +19,8 @@ namespace Settings
     inline const juce::Identifier windowW    { "windowW" };
     inline const juce::Identifier windowH    { "windowH" };
     inline const juce::Identifier demoClock  { "demoClock" };
+    inline const juce::Identifier language  { "language" };   // 0 = 中文, 1 = English
+    inline const juce::Identifier stateVersion { "stateVersion" };
 }
 
 //==============================================================================
@@ -84,10 +86,11 @@ public:
     const LyricsDocument& lyrics() const noexcept { return document; }
 
     /** 解析并替换歌词，同时写入工程状态。返回解析摘要。 */
-    LyricsInfo setLyricsText (const juce::String& text, const juce::String& path = {});
+    LyricsInfo setLyricsText (const juce::String& text, const juce::String& path = {},
+                              int language = 0);
 
     /** 宿主载入工程后，由编辑器在 GUI 线程调用，避免跨线程改歌词。 */
-    void reloadFromSettings();
+    void reloadFromSettings (int language = 0);
 
     bool consumeStateReloadFlag() noexcept
     {

@@ -13,6 +13,7 @@ namespace
     juce::Font uiFont (float size, bool bold = false)
     {
        #if JUCE_WINDOWS
+        // YaHei covers both CJK and Latin, so it works in either UI language.
         return juce::Font (juce::String ("Microsoft YaHei UI"), size,
                            bold ? juce::Font::bold : juce::Font::plain);
        #else
@@ -31,7 +32,7 @@ namespace
         return juce::String::formatted ("%s%02d:%06.3f", negative ? "-" : "", mins, secs);
     }
 
-    /** 国内很多 LRC 是 GBK 编码，这里做 UTF-8 / UTF-16 / GB18030 兼容读取。 */
+    /** Many Chinese LRC files are GBK encoded: accept UTF-8 / UTF-16 / GB18030. */
     juce::String decodeLyricsFile (const juce::File& file)
     {
         juce::MemoryBlock data;
@@ -106,6 +107,19 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
         addAndMakeVisible (*b);
     }
 
+    languageBox.setEditableText (false);
+    languageBox.setJustificationType (juce::Justification::centred);
+
+    // Item labels are language-independent, so they are added only once.
+    updatingLanguageBox = true;
+    languageBox.addItem (Lang::tr (Lang::TextId::languageChinese, 0), 1);
+    languageBox.addItem (Lang::tr (Lang::TextId::languageEnglish, 0), 2);
+    languageBox.setSelectedId (language + 1, juce::dontSendNotification);
+    updatingLanguageBox = false;
+
+    languageBox.addListener (this);
+    addAndMakeVisible (languageBox);
+
     demoClockToggle.addListener (this);
     addAndMakeVisible (demoClockToggle);
 
@@ -140,13 +154,10 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
 
     hintLabel.setFont (uiFont (11.0f));
     hintLabel.setJustificationType (juce::Justification::centredLeft);
-    hintLabel.setText ("提示：歌词跟随宿主播放头 · 任意跳转 / 循环 / 倒退都会立即对齐 · 支持拖入 .lrc / .srt / .txt",
-                       juce::dontSendNotification);
     addAndMakeVisible (hintLabel);
 
     fontLabel.setFont (uiFont (11.0f));
     fontLabel.setJustificationType (juce::Justification::centredLeft);
-    fontLabel.setText ("字号", juce::dontSendNotification);
     addAndMakeVisible (fontLabel);
 
     editorBox.setMultiLine (true, true);
@@ -154,10 +165,11 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     editorBox.setScrollbarsShown (true);
     editorBox.setFont (uiFont (14.0f));
     editorBox.setPopupMenuEnabled (true);
-    addChildComponent (editorBox);      // 默认隐藏
+    addChildComponent (editorBox);      // hidden by default
 
-    fileDescription = "示例歌词  ·  拖入文件即可替换";
+    fileDescription = tr (Lang::TextId::demoFileDesc);
 
+    applyUiText (true);
     refreshLookAndFeel();
     updateEditingVisibility();
     startTimerHz (30);
@@ -177,11 +189,46 @@ void LyricSyncEditor::syncControlsFromSettings()
     fontScale  = static_cast<double> (processor.getSetting (Settings::fontScale, 1.0));
     themeIndex = static_cast<int>    (processor.getSetting (Settings::theme, 0));
     demoMode   = static_cast<bool>   (processor.getSetting (Settings::demoClock, false));
+    language   = juce::jlimit (0, 1, static_cast<int> (processor.getSetting (Settings::language, 0)));
 
     palette = UiPalette::fromIndex (themeIndex);
     fontSlider.setValue (fontScale, juce::dontSendNotification);
     demoClockToggle.setToggleState (demoMode, juce::dontSendNotification);
-    themeButton.setButtonText (themeIndex == 1 ? "深色" : "浅色");
+}
+
+/** Re-apply every localised widget text. Called at startup and on language switch. */
+void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
+{
+    loadButton      .setButtonText (tr (Lang::TextId::loadLyrics));
+    pasteButton     .setButtonText (tr (Lang::TextId::pasteEdit));
+    demoButton      .setButtonText (tr (Lang::TextId::demoLyrics));
+    themeButton     .setButtonText (tr (themeIndex == 1 ? Lang::TextId::themeDark
+                                                        : Lang::TextId::themeLight));
+
+    updatingLanguageBox = true;
+    languageBox.setSelectedId (language + 1, juce::dontSendNotification);
+    updatingLanguageBox = false;
+    languageBox.setTooltip (tr (Lang::TextId::uiLanguage));
+
+    minusButton     .setButtonText (tr (Lang::TextId::minusSymbol));
+    resetButton     .setButtonText (tr (Lang::TextId::reset));
+    demoPlayButton  .setButtonText (tr (Lang::TextId::playSymbol));
+    demoStopButton  .setButtonText (tr (Lang::TextId::stopSymbol));
+    applyTextButton .setButtonText (tr (Lang::TextId::applyLyrics));
+    cancelTextButton.setButtonText (tr (Lang::TextId::cancel));
+    demoClockToggle .setButtonText (tr (Lang::TextId::manualPreview));
+
+    fontLabel.setText (tr (Lang::TextId::fontSize), juce::dontSendNotification);
+    hintLabel.setText (tr (Lang::TextId::hint), juce::dontSendNotification);
+
+    if (reloadDemoLyrics && usingDemoLyrics)
+    {
+        // Built-in demo follows the UI language; user-supplied lyrics never change.
+        loadLyricsText (demoLyricsText (language), tr (Lang::TextId::demoLyrics), true);
+        fileDescription = tr (Lang::TextId::demoFileDesc);
+    }
+
+    repaint();
 }
 
 void LyricSyncEditor::refreshLookAndFeel()
@@ -209,6 +256,16 @@ void LyricSyncEditor::refreshLookAndFeel()
     l.setColour (juce::ToggleButton::textColourId,          palette.dim);
     l.setColour (juce::ToggleButton::tickColourId,          palette.accent);
     l.setColour (juce::ToggleButton::tickDisabledColourId,  palette.faint);
+
+    l.setColour (juce::ComboBox::backgroundColourId,  palette.panel);
+    l.setColour (juce::ComboBox::textColourId,        palette.text);
+    l.setColour (juce::ComboBox::outlineColourId,     palette.panelEdge);
+    l.setColour (juce::ComboBox::arrowColourId,       palette.dim);
+    l.setColour (juce::ComboBox::buttonColourId,      palette.panelEdge);
+    l.setColour (juce::PopupMenu::backgroundColourId, palette.panel);
+    l.setColour (juce::PopupMenu::textColourId,       palette.text);
+    l.setColour (juce::PopupMenu::highlightedBackgroundColourId, palette.accentSoft);
+    l.setColour (juce::PopupMenu::highlightedTextColourId,       palette.text);
 
     clockLabel.setColour (juce::Label::textColourId, palette.text);
     statusLabel.setColour (juce::Label::textColourId, palette.dim);
@@ -254,9 +311,10 @@ void LyricSyncEditor::resized()
     const int h = getHeight();
     constexpr int pad = 22;
 
-    clockLabel .setBounds (w - 470, 8, 280, 30);
-    statusLabel.setBounds (w - 470, 37, 280, 18);
-    themeButton.setBounds (w - 104, 18, 80, 28);
+    clockLabel    .setBounds (w - 470, 8, 280, 30);
+    statusLabel   .setBounds (w - 470, 37, 280, 18);
+    languageBox   .setBounds (w - 190, 18, 78, 28);
+    themeButton   .setBounds (w - 104, 18, 80, 28);
 
     const juce::Rectangle<int> stage (pad, 72, w - pad * 2, h - 72 - 152);
     editorBox.setBounds (stage.reduced (2));
@@ -337,9 +395,9 @@ void LyricSyncEditor::paintHeader (juce::Graphics& g, juce::Rectangle<float> are
     drawText (g, juce::Rectangle<float> (48.0f, 10.0f, 250.0f, 28.0f),
               "LyricSync", 20.0f, palette.text, true, -1, {}, 1.0f);
     drawText (g, juce::Rectangle<float> (48.0f, 35.0f, 300.0f, 18.0f),
-              "DAW 歌词同步  ·  跟随宿主播放头", 11.0f, palette.faint, false);
+              tr (Lang::TextId::appSubtitle), 11.0f, palette.faint, false);
 
-    // 状态灯
+    // Status LED
     const bool live = ! demoMode && processor.hasHostTime.load()
                    && (juce::Time::getMillisecondCounterHiRes() - lastHostUpdateMs < 1800.0);
     g.setColour (demoMode ? palette.warn
@@ -365,15 +423,14 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
 
     g.setColour (palette.faint);
     g.setFont (uiFont (10.5f, true));
-    g.drawText ("CURRENT LINE", static_cast<int> (area.getX() + 30.0f),
+    g.drawText (tr (Lang::TextId::currentLine), static_cast<int> (area.getX() + 30.0f),
                 static_cast<int> (area.getY() + 16.0f), 160, 16,
                 juce::Justification::centredLeft);
 
     if (doc.isEmpty())
     {
         drawText (g, area.reduced (40.0f, 70.0f),
-                  "把 .lrc / .srt / .txt 拖进窗口\n或点击左下角「载入歌词」",
-                  22.0f, palette.dim, true);
+                  tr (Lang::TextId::emptyStage), 22.0f, palette.dim, true);
         return;
     }
 
@@ -400,16 +457,16 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
     auto currArea = inner.withY (inner.getY() + ih * 0.25f).withHeight (ih * 0.50f);
     auto nextArea = inner.withY (inner.getY() + ih * 0.75f).withHeight (ih * 0.25f);
 
-    //---- 上一句 -------------------------------------------------------------
+    //---- Previous line ------------------------------------------------------
     juce::String prevText;
     if (idx > 0)
         prevText = doc.line (idx - 1).text;
     else if (idx == -1)
-        prevText = "♪  前奏";
+        prevText = tr (Lang::TextId::intro);
 
     drawText (g, prevArea, prevText, prevSize, palette.dim.withAlpha (0.55f), false);
 
-    //---- 当前句 -------------------------------------------------------------
+    //---- Current line -------------------------------------------------------
     if (idx >= 0)
     {
         const auto& line = doc.line (idx);
@@ -430,7 +487,7 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
             drawText (g, transArea, line.translation, transSize,
                       palette.dim.withAlpha (0.8f), false, -1, {}, fade);
 
-        // 句内进度
+        // Progress within the current line
         const double start = line.time;
         const double end   = doc.lineEnd (idx);
         const double frac  = juce::jlimit (0.0, 1.0,
@@ -447,26 +504,24 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
     else
     {
         drawText (g, currArea.reduced (0.0f, 20.0f),
-                  "·  ·  ·", mainSize * 0.8f, palette.faint, false);
+                  juce::String (".  .  ."), mainSize * 0.8f, palette.faint, false);
 
         if (doc.size() > 0)
         {
             const double until = doc.line (0).time;
             drawText (g, currArea.withY (currArea.getBottom() - 26.0f).withHeight (24.0f),
-                      juce::String ("下一句还有 ")
+                      tr (Lang::TextId::nextLineIn)
                       + juce::String (juce::jmax (0.0, until - displayTime), 1)
-                      + juce::String (" 秒"),
+                      + tr (Lang::TextId::secondsSuffix),
                       12.0f, palette.faint, false);
         }
     }
 
-    //---- 下一句 -------------------------------------------------------------
+    //---- Next line ----------------------------------------------------------
     const int nextIdx = idx < 0 ? 0 : idx + 1;
     if (nextIdx < doc.size())
         drawText (g, nextArea, doc.line (nextIdx).text, nextSize,
                   palette.dim.withAlpha (0.45f), false);
-
-    // 解析警告显示在底部文件信息栏，避免遮挡歌词
 }
 
 void LyricSyncEditor::paintFooter (juce::Graphics& g, juce::Rectangle<float> area)
@@ -505,10 +560,12 @@ void LyricSyncEditor::timerCallback()
 {
     if (processor.consumeStateReloadFlag())
     {
-        processor.reloadFromSettings();
+        processor.reloadFromSettings (language);
         syncControlsFromSettings();
         refreshLookAndFeel();
-        fileDescription = "宿主工程中保存的歌词";
+        applyUiText (false);
+        usingDemoLyrics = false;
+        fileDescription = tr (Lang::TextId::savedFileDesc);
         currentIndex = -2;
     }
 
@@ -540,7 +597,7 @@ void LyricSyncEditor::timerCallback()
     }
     else
     {
-        // 关键一行：直接用宿主的绝对项目时间，不做任何累加。
+        // The one line that matters: use the host's absolute project time.
         displayTime = processor.positionSeconds.load() + offsetMs / 1000.0;
         seekSlider.setValue (juce::jlimit (0.0, duration, displayTime),
                              juce::dontSendNotification);
@@ -567,7 +624,7 @@ void LyricSyncEditor::updateLabels (double t)
 
     auto label = fileDescription;
     if (lastWarning.isNotEmpty())
-        label += juce::String ("    ⚠ ") + lastWarning;
+        label += tr (Lang::TextId::warningPrefix) + lastWarning;
     fileLabel.setText (label, juce::dontSendNotification);
 }
 
@@ -587,32 +644,32 @@ juce::String LyricSyncEditor::barBeatText() const
     const double beat = ppq - static_cast<double> (bar - 1) * beatsPerBar + 1.0;
     const int tick = static_cast<int> ((beat - std::floor (beat)) * 960.0);
 
-    return "小节 " + juce::String (bar) + "."
+    return tr (Lang::TextId::barPrefix) + juce::String (bar) + "."
          + juce::String (static_cast<int> (std::floor (beat))) + "."
          + juce::String::formatted ("%03d", tick)
-         + "    ·    " + juce::String (processor.bpm.load(), 1)
-         + " BPM    ·    " + juce::String (num) + "/" + juce::String (den);
+         + sep() + juce::String (processor.bpm.load(), 1)
+         + " BPM" + sep() + juce::String (num) + "/" + juce::String (den);
 }
 
 juce::String LyricSyncEditor::statusText() const
 {
     if (demoMode)
-        return "手动预览  ·  拖动进度条定位";
+        return tr (Lang::TextId::statusManual);
 
     if (! processor.hasHostTime.load())
-        return "等待宿主时间码…（可勾选手动预览）";
+        return tr (Lang::TextId::statusWaiting);
 
     juce::String s;
-    if (processor.isRecording.load())    s = "录音中";
-    else if (processor.isPlaying.load()) s = "播放中";
-    else                                 s = "已停止";
+    if (processor.isRecording.load())    s = tr (Lang::TextId::statusRecording);
+    else if (processor.isPlaying.load()) s = tr (Lang::TextId::statusPlaying);
+    else                                 s = tr (Lang::TextId::statusStopped);
 
     if (processor.isLooping.load())
-        s += "  ·  循环";
+        s += tr (Lang::TextId::statusLoop);
 
     if (lastHostUpdateMs > 0.0
         && juce::Time::getMillisecondCounterHiRes() - lastHostUpdateMs > 1800.0)
-        s += "  ·  宿主暂未推送时间码";
+        s += tr (Lang::TextId::statusIdle);
 
     return s;
 }
@@ -622,7 +679,11 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
 {
     if (button == &loadButton)          { openFileDialog(); return; }
     if (button == &pasteButton)         { enterEditMode(); return; }
-    if (button == &demoButton)          { loadLyricsText (demoLyricsText(), "示例歌词"); return; }
+    if (button == &demoButton)
+    {
+        loadLyricsText (demoLyricsText (language), tr (Lang::TextId::demoLyrics), true);
+        return;
+    }
     if (button == &themeButton)         { setTheme (themeIndex == 0 ? 1 : 0); return; }
     if (button == &applyTextButton)     { leaveEditMode (true); return; }
     if (button == &cancelTextButton)    { leaveEditMode (false); return; }
@@ -655,6 +716,12 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
     }
 }
 
+void LyricSyncEditor::comboBoxChanged (juce::ComboBox* box)
+{
+    if (box == &languageBox && ! updatingLanguageBox)
+        setLanguage (languageBox.getSelectedId() - 1);
+}
+
 void LyricSyncEditor::sliderValueChanged (juce::Slider* slider)
 {
     if (slider == &seekSlider && demoMode)
@@ -675,7 +742,7 @@ void LyricSyncEditor::sliderValueChanged (juce::Slider* slider)
 void LyricSyncEditor::openFileDialog()
 {
     chooser = std::make_unique<juce::FileChooser> (
-        "选择歌词文件",
+        tr (Lang::TextId::fileChooserTitle),
         juce::File::getSpecialLocation (juce::File::userHomeDirectory),
         "*.lrc;*.txt;*.srt;*.vtt");
 
@@ -696,39 +763,45 @@ void LyricSyncEditor::loadLyricsFile (const juce::File& file)
 
     if (text.isEmpty())
     {
-        fileDescription = "读取失败：" + file.getFileName();
-        lastWarning = "文件为空或无法读取（支持 UTF-8 / UTF-16 / GBK）";
+        fileDescription = tr (Lang::TextId::readFailed) + file.getFileName();
+        lastWarning = tr (Lang::TextId::emptyFile);
+        usingDemoLyrics = false;
         repaint();
         return;
     }
 
-    const auto info = processor.setLyricsText (text, file.getFullPathName());
+    const auto info = processor.setLyricsText (text, file.getFullPathName(), language);
     offsetMs = 0.0;
     processor.setSetting (Settings::offsetMs, 0.0);
     processor.setSetting (Settings::lyricsPath, file.getFullPathName());
 
-    fileDescription = file.getFileName() + "  ·  " + info.formatName
-                    + "  ·  " + juce::String (info.lineCount) + " 句";
+    fileDescription = file.getFileName() + sep() + info.formatName
+                    + sep() + juce::String (info.lineCount)
+                    + tr (Lang::TextId::lineCountSuffix);
     if (info.karaokeLines > 0)
-        fileDescription += "  ·  逐字";
+        fileDescription += tr (Lang::TextId::karaokeSuffix);
 
     lastWarning = info.warning;
+    usingDemoLyrics = false;
     currentIndex = -2;
     demoTime = 0.0;
     refreshLookAndFeel();
     repaint();
 }
 
-void LyricSyncEditor::loadLyricsText (const juce::String& text, const juce::String& label)
+void LyricSyncEditor::loadLyricsText (const juce::String& text,
+                                      const juce::String& label, bool isDemo)
 {
-    const auto info = processor.setLyricsText (text);
+    const auto info = processor.setLyricsText (text, {}, language);
     offsetMs = 0.0;
     processor.setSetting (Settings::offsetMs, 0.0);
     processor.setSetting (Settings::lyricsPath, "");
 
-    fileDescription = label + "  ·  " + info.formatName
-                    + "  ·  " + juce::String (info.lineCount) + " 句";
+    fileDescription = label + sep() + info.formatName
+                    + sep() + juce::String (info.lineCount)
+                    + tr (Lang::TextId::lineCountSuffix);
     lastWarning = info.warning;
+    usingDemoLyrics = isDemo;
     currentIndex = -2;
     demoTime = 0.0;
     repaint();
@@ -749,7 +822,7 @@ void LyricSyncEditor::enterEditMode()
 void LyricSyncEditor::leaveEditMode (bool apply)
 {
     if (apply)
-        loadLyricsText (editorBox.getText(), "粘贴的歌词文本");
+        loadLyricsText (editorBox.getText(), tr (Lang::TextId::pastedLabel));
 
     editing = false;
     editorBox.setVisible (false);
@@ -763,8 +836,20 @@ void LyricSyncEditor::setTheme (int index)
     themeIndex = index;
     palette = UiPalette::fromIndex (index);
     processor.setSetting (Settings::theme, index);
-    themeButton.setButtonText (index == 1 ? "深色" : "浅色");
+    themeButton.setButtonText (tr (index == 1 ? Lang::TextId::themeDark
+                                              : Lang::TextId::themeLight));
     refreshLookAndFeel();
+}
+
+void LyricSyncEditor::setLanguage (int next)
+{
+    next = juce::jlimit (0, 1, next);
+    if (next == language)
+        return;
+
+    language = next;
+    processor.setSetting (Settings::language, language);
+    applyUiText (true);
 }
 
 //==============================================================================
