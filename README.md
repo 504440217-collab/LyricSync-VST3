@@ -63,6 +63,10 @@ JUCE 的 `AudioPlayHead::getPosition()` 在 VST3 下读的正是 Steinberg `Proc
 3. **双击本目录的 `push-to-github.bat`**。脚本已自动定位本机便携版 Git，并预填了默认仓库地址，
    **直接按回车**即可；若仓库地址不同，粘贴正确地址再回车。第一次推送若弹出浏览器登录 GitHub，点授权即可。
    （等效命令：`git remote add origin <地址>` → `git push -u origin main`；本地仓库已初始化并提交好。）
+   > 若新建仓库时 GitHub 自动放了 `.github/workflows/blank.yml`（或勾了 README），首次推送会报
+   > `! [rejected] main -> main (fetch first)`。这不是密码错误，只是远程多了一个初始提交。
+   > 脚本会自动 `fetch` + 合并远程历史（保留本工程文件、丢弃那个无用的 CI 模板），再重新推送；
+   > 万一仍失败，直接**再双击一次本脚本**即可。
 4. 推送会**自动触发**编译：打开仓库 → **Actions** → **Build VST3 (Windows)** 查看进度。
    若没自动开始，点 **Run workflow** 手动触发。
 5. 变绿后在该次运行页面底部 **Artifacts** 下载 `LyricSync-VST3-Windows-x64`，
