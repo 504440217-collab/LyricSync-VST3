@@ -1,0 +1,41 @@
+name: Build VST3 (Windows)
+
+# 本机没有 Visual Studio 时，用 GitHub 免费托管的 Windows runner 编译：
+# 仓库 -> Actions -> Build VST3 (Windows) -> Run workflow -> 下载 artifact。
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+    paths-ignore:
+      - '**.md'
+      - 'preview/**'
+      - 'examples/**'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest      # 自带 VS 2022 / CMake / Git，无需额外安装
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure (JUCE 7.0.12 由 CMake 自动拉取)
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        shell: pwsh
+
+      - name: Build Release
+        run: cmake --build build --config Release --parallel 4
+        shell: pwsh
+
+      - name: Show artefacts
+        run: Get-ChildItem -Recurse build/LyricSync_artefacts/Release | Select-Object -ExpandProperty FullName
+        shell: pwsh
+
+      - name: Upload VST3 + Standalone
+        uses: actions/upload-artifact@v4
+        with:
+          name: LyricSync-VST3-Windows-x64
+          if-no-files-found: error
+          path: |
+            build/LyricSync_artefacts/Release/VST3/LyricSync.vst3
+            build/LyricSync_artefacts/Release/Standalone/LyricSync.exe

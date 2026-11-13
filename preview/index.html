@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LyricSync · 界面预览 / 歌词校对</title>
+<style>
+  :root{
+    --bg1:#11141c; --bg2:#0b0d13; --card:#161b27; --panel:#1b2030;
+    --edge:#333c55; --text:#f2f5ff; --dim:#9aa5bf; --faint:#5f6a85;
+    --accent:#5ce1c1; --accent2:#3aa88f; --warn:#ffb86b; --track:#2b3247;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:linear-gradient(180deg,var(--bg1),var(--bg2));
+       color:var(--text);font-family:"Microsoft YaHei UI","PingFang SC","Segoe UI",sans-serif;
+       display:flex;align-items:center;justify-content:center;padding:24px}
+  .wrap{width:min(1040px,100%)}
+  .banner{display:flex;gap:10px;align-items:center;background:rgba(255,184,107,.09);
+          border:1px solid rgba(255,184,107,.3);color:var(--warn);border-radius:12px;
+          padding:10px 14px;font-size:13px;margin-bottom:14px;line-height:1.5}
+  .banner b{color:#ffd6a3}
+  .plugin{background:linear-gradient(160deg,#151a26,#10131c);border:1px solid var(--edge);
+          border-radius:20px;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.5)}
+  header{display:flex;align-items:center;gap:14px;padding:18px 24px;border-bottom:1px solid rgba(90,105,145,.22)}
+  .logo{display:flex;align-items:flex-end;gap:4px;height:28px}
+  .logo i{display:block;width:7px;border-radius:4px;background:var(--accent)}
+  .logo i:first-child{height:26px}.logo i:last-child{height:13px;opacity:.45}
+  .brand{font-size:19px;font-weight:700;letter-spacing:.3px}
+  .sub{font-size:11px;color:var(--faint);margin-top:3px}
+  .clock{margin-left:auto;text-align:right}
+  #clock{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:1px}
+  #status{font-size:11px;color:var(--dim);margin-top:2px}
+  .stage{margin:18px 22px;height:290px;background:var(--card);border:1px solid rgba(90,105,145,.32);
+         border-radius:16px;position:relative;display:flex;flex-direction:column;
+         align-items:center;justify-content:center;overflow:hidden;padding:18px 30px}
+  .stage::before{content:"CURRENT LINE";position:absolute;left:22px;top:16px;
+                 font-size:10px;letter-spacing:2px;color:var(--faint)}
+  #counter{position:absolute;right:22px;top:14px;font-size:11px;color:var(--faint)}
+  .line{width:100%;text-align:center;white-space:pre-wrap;word-break:break-word;transition:opacity .2s}
+  #prev{font-size:17px;color:rgba(154,165,191,.55);height:52px;display:flex;align-items:center;justify-content:center}
+  #current{font-size:38px;font-weight:700;line-height:1.45;color:var(--accent);min-height:96px;
+           display:flex;align-items:center;justify-content:center;text-shadow:0 0 28px rgba(92,225,193,.22)}
+  #current .sung{color:var(--accent)}#current .todo{color:var(--text)}
+  #trans{font-size:14px;color:var(--dim);min-height:22px;text-align:center}
+  #next{font-size:17px;color:rgba(154,165,191,.45);height:52px;display:flex;align-items:center;justify-content:center}
+  .innerbar{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);width:190px;height:3px;
+            background:var(--track);border-radius:3px;overflow:hidden}
+  .innerbar span{display:block;height:100%;width:0;background:var(--accent);border-radius:3px}
+  .controls{padding:0 22px 20px}
+  .seekrow{display:flex;align-items:center;gap:12px;padding:4px 0 14px}
+  .seekrow input{flex:1}
+  input[type=range]{-webkit-appearance:none;height:5px;border-radius:5px;background:var(--track);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+        background:var(--accent);border:2px solid #10131c;cursor:pointer;box-shadow:0 0 10px rgba(92,225,193,.5)}
+  .tcode{font-size:12px;color:var(--faint);font-variant-numeric:tabular-nums;min-width:96px;text-align:right}
+  .btnrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  button,label.filebtn{background:var(--panel);color:var(--text);border:1px solid var(--edge);
+        border-radius:9px;padding:8px 13px;font-size:12.5px;cursor:pointer;font-family:inherit;transition:.15s}
+  button:hover,label.filebtn:hover{border-color:var(--accent2);background:#232a3d}
+  button.primary{background:var(--accent2);border-color:var(--accent2);color:#06120f;font-weight:700;min-width:76px}
+  button.primary:hover{background:var(--accent)}
+  .sep{width:1px;height:22px;background:var(--edge);margin:0 4px}
+  .hint{font-size:11px;color:var(--faint);margin-left:auto}
+  .metarow{display:flex;justify-content:space-between;gap:12px;margin-top:14px;
+           font-size:11.5px;color:var(--faint);border-top:1px solid rgba(90,105,145,.22);padding-top:12px}
+  .metarow span:first-child{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #editor{display:none;margin:0 22px 18px}
+  #editor textarea{width:100%;height:230px;background:#0e121b;color:var(--text);border:1px solid var(--edge);
+        border-radius:12px;padding:14px;font-family:Consolas,"Microsoft YaHei UI",monospace;font-size:13px;line-height:1.7;resize:vertical}
+  .editactions{display:flex;gap:8px;margin-top:10px}
+  footer{padding:0 24px 22px;font-size:11.5px;color:var(--faint);line-height:1.7}
+  kbd{background:var(--panel);border:1px solid var(--edge);border-radius:5px;padding:1px 6px;color:var(--dim)}
+  .flash{position:absolute;top:14px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--warn);
+         opacity:0;transition:opacity .25s;pointer-events:none}
+  .flash.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="banner">
+    <span>◈</span>
+    <div><b>界面预览 / 歌词校对工具</b>　这是浏览器里的交互演示，不是 VST3 插件本体。插件请编译 <code>CMakeLists.txt</code> 工程。这里的时间轴由网页模拟，用来验证「任意跳转时间码，歌词立即跟随」的效果与歌词时间点。</div>
+  </div>
+
+  <div class="plugin" id="dropzone">
+    <header>
+      <div class="logo"><i></i><i></i></div>
+      <div><div class="brand">LyricSync</div><div class="sub">DAW 歌词同步 · 跟随宿主播放头</div></div>
+      <div class="clock"><div id="clock">00:00.000</div><div id="status">已停止 · 预览模式</div></div>
+    </header>
+
+    <div class="stage" id="stage">
+      <div id="counter">0 / 0</div>
+      <div class="flash" id="flash"></div>
+      <div class="line" id="prev"></div>
+      <div class="line" id="current">· · ·</div>
+      <div class="line" id="trans"></div>
+      <div class="line" id="next"></div>
+      <div class="innerbar"><span id="innerfill"></span></div>
+    </div>
+
+    <div class="controls">
+      <div class="seekrow">
+        <input type="range" id="seek" min="0" max="60" step="0.01" value="0">
+        <div class="tcode" id="seeklabel">00:00.000</div>
+      </div>
+      <div class="btnrow">
+        <button class="primary" id="play">▶ 播放</button>
+        <button id="m5">−5s</button><button id="p5">+5s</button>
+        <div class="sep"></div>
+        <button data-jump="0">跳到 0s</button>
+        <button data-jump="12">12s</button>
+        <button data-jump="40">40s</button>
+        <button id="rand">随机跳转</button>
+        <div class="sep"></div>
+        <label class="filebtn">导入歌词<input type="file" id="file" accept=".lrc,.srt,.txt,.vtt" hidden></label>
+        <button id="paste">粘贴 / 编辑</button>
+        <button id="sample">示例 LRC</button>
+        <button id="karaoke">逐字示例</button>
+        <button id="srt">SRT 示例</button>
+        <span class="hint">也可直接把 .lrc 拖到窗口</span>
+      </div>
+      <div class="metarow"><span id="fileinfo">示例歌词 · LRC</span><span id="meta">小节 1.1.000 · 120.0 BPM · 4/4</span></div>
+    </div>
+
+    <div id="editor">
+      <textarea id="textarea" spellcheck="false" placeholder="在这里粘贴 LRC / SRT 歌词文本…"></textarea>
+      <div class="editactions"><button class="primary" id="apply">应用歌词</button><button id="cancel">取消</button></div>
+    </div>
+
+    <footer>
+      演示操作：<kbd>播放</kbd> 后拖动进度条、点 <kbd>12s</kbd> / <kbd>40s</kbd> / <kbd>随机跳转</kbd>，歌词会在同一帧切到对应句子 —— 这正是 VST3 插件读取宿主 <code>projectTimeSamples</code> 后的行为。<br>
+      真实插件里时间来自 DAW 播放头，这里用网页时钟模拟；歌词解析、二分查找、逐字高亮的逻辑与插件源码一致。
+    </footer>
+  </div>
+</div>
+
+<script>
+const DEMO = `[ti:LyricSync 演示歌词]
+[ar:Muzi Audio Tools]
+
+[00:00.00]LyricSync · 歌词同步显示
+[00:04.00]把 .lrc 文件拖进窗口就能开始
+[00:08.50]播放头跳到哪里
+[00:12.00]歌词就跟到哪里
+[00:15.50]停止、倒退、循环都不会错位
+[00:20.00]因为它读的是宿主的项目时间
+[00:24.50]而不是插件自己的计时器
+[00:29.00]试试把播放头拖到 00:40
+[00:33.00]看看下一句会不会立刻出现
+[00:37.00]再跳回 00:12 也没问题
+[00:40.00]你跳到了 40 秒，这一句应该已经亮起
+[00:45.00]在下方可以微调整体偏移
+[00:50.00]也可以粘贴自己的歌词文本
+[00:55.00]支持 LRC / 逐字 LRC / SRT / 纯文本
+[01:00.00]祝录音顺利`;
+
+const KARAOKE = `[ti:逐字高亮演示]
+[00:03.00]这<00:03.00>一<00:03.35>句<00:03.70>会<00:04.05>逐<00:04.40>字<00:04.75>亮<00:05.10>起<00:05.45>来<00:05.80>
+[00:08.00]播<00:08.00>放<00:08.30>头<00:08.60>跳<00:08.90>到<00:09.20>哪<00:09.50>里<00:09.80>
+[00:12.00]歌<00:12.00>词<00:12.35>就<00:12.70>跟<00:13.05>到<00:13.40>哪<00:13.75>里<00:14.10>
+[00:16.00]随<00:16.00>意<00:16.30>拖<00:16.60>动<00:16.90>时<00:17.20>间<00:17.50>码<00:17.80>也<00:18.10>同<00:18.40>步<00:18.70>
+[00:21.00]录<00:21.00>音<00:21.40>室<00:21.80>里<00:22.20>的<00:22.60>提<00:23.00>词<00:23.40>器<00:23.80>
+[00:26.00]不<00:26.00>用<00:26.40>再<00:26.80>手<00:27.20>动<00:27.60>翻<00:28.00>页<00:28.40>`;
+
+const SRT = `1
+00:00:02,000 --> 00:00:06,000
+SRT 字幕也能直接拖进插件窗口
+
+2
+00:00:06,000 --> 00:00:10,500
+时间码读取自宿主播放头
+
+3
+00:00:10,500 --> 00:00:15,000
+随意跳转，歌词立即对齐
+
+4
+00:00:15,000 --> 00:00:20,000
+循环与倒退同样不会错位`;
+
+function parseClock(s){
+  s = s.trim().replace(/,/g,'.');
+  if(!/^[\d:+.\- ]+$/.test(s)) return null;
+  const p = s.split(':').map(Number);
+  let v = 0;
+  if(p.length===3) v = p[0]*3600+p[1]*60+p[2];
+  else if(p.length===2) v = p[0]*60+p[1];
+  else if(p.length===1) v = p[0];
+  else return null;
+  return (isFinite(v)&&v>=0)?v:null;
+}
+
+function parseLyrics(raw){
+  let text = raw.replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n');
+  const lines=[], meta={title:'',artist:'',offsetMs:0};
+  let format='LRC', karaoke=0, plain=[];
+
+  if(text.includes('-->')){
+    format='SRT';
+    const rows=text.split('\n'); let pending=null, buf='';
+    const flush=()=>{ if(pending!==null&&buf.trim()) lines.push({time:pending,text:buf.trim(),chars:[]}); pending=null;buf=''; };
+    for(let r of rows){
+      const ln=r.trim();
+      if(ln.includes('-->')){ flush(); const t=parseClock(ln.split('-->')[0]); if(t!==null) pending=t; continue; }
+      if(!ln || /^\d+$/.test(ln) || ln.startsWith('WEBVTT')){ flush(); continue; }
+      buf += (buf?'  ':'') + ln.replace(/<[^>]*>/g,'');
+    }
+    flush();
+  } else {
+    for(let row of text.split('\n')){
+      let s=row.trim(); if(!s||s.startsWith('#')) continue;
+      const stamps=[]; let tags=false;
+      while(s.startsWith('[')){
+        const close=s.indexOf(']'); if(close<0) break;
+        const tag=s.substring(1,close).trim();
+        const t=parseClock(tag);
+        if(t!==null) stamps.push(t);
+        else if(/^(ar|ti|al|by|offset|length|re|ve):/i.test(tag)){
+          const key=tag.split(':')[0].toLowerCase(), val=tag.substring(tag.indexOf(':')+1).trim();
+          if(key==='ti')meta.title=val; if(key==='ar')meta.artist=val;
+          if(key==='offset')meta.offsetMs=parseFloat(val)||0;
+        } else break;
+        s=s.substring(close+1); tags=true;
+      }
+      if(!stamps.length){ if(s.trim())plain.push(s.trim()); else if(!tags)plain.push(row.trim()); continue; }
+      s=s.trim(); if(!s)continue;
+
+      // 抽出 <mm:ss.xx> 逐字锚点
+      let clean='', anchors=[];
+      for(let i=0;i<s.length;){
+        if(s[i]==='<'){
+          const close=s.indexOf('>',i+1);
+          if(close>0){ const t=parseClock(s.substring(i+1,close)); if(t!==null){ anchors.push([clean.length,t]); i=close+1; continue; } }
+        }
+        clean+=s[i++];
+      }
+      let chars=[];
+      if(anchors.length&&clean.length){
+        karaoke++;
+        const a=[[0,stamps[0]]];
+        for(const [idx,t] of anchors) if(idx>0&&idx<=clean.length&&idx>a[a.length-1][0]&&t>a[a.length-1][1]) a.push([idx,t]);
+        if(a.length>1){
+          for(let ci=0;ci<clean.length;ci++){
+            let k=0; while(k+1<a.length&&a[k+1][0]<=ci)k++;
+            let abs=a[k][1];
+            if(k+1<a.length){ const di=a[k+1][0]-a[k][0], dt=a[k+1][1]-a[k][1]; if(di>0)abs+=dt*(ci-a[k][0])/di; }
+            else { const prev=a[a.length-2],last=a[a.length-1];
+                   const per=last[0]>prev[0]?(last[1]-prev[1])/(last[0]-prev[0]):0.08;
+                   abs=last[1]+per*(ci-last[0]); }
+            chars.push(Math.max(0,abs-stamps[0]));
+          }
+        }
+      }
+      for(const t of stamps) lines.push({time:t,text:clean,chars:[...chars],translation:''});
+    }
+    if(!lines.length&&plain.length){ format='TXT'; plain.forEach((t,i)=>lines.push({time:i*4,text:t,chars:[],translation:''})); }
+  }
+
+  lines.sort((a,b)=>a.time-b.time);
+  for(let i=1;i<lines.length;){
+    const p=lines[i-1],c=lines[i];
+    if(Math.abs(c.time-p.time)<0.004&&!p.translation&&!p.chars.length&&!c.chars.length&&c.text!==p.text){p.translation=c.text;lines.splice(i,1);}
+    else i++;
+  }
+  if(meta.offsetMs) lines.forEach(l=>l.time=Math.max(0,l.time+meta.offsetMs/1000));
+  if(karaoke)format='Enhanced LRC';
+  return {lines,meta,format,karaoke};
+}
+
+let doc=parseLyrics(DEMO), t=0, playing=false, last=0, lastIdx=-2, dragging=false;
+let fileLabel='示例歌词 · LRC', currentRaw=DEMO;
+
+const $=id=>document.getElementById(id);
+const fmt=s=>{const neg=s<0;s=Math.abs(s);const m=Math.floor(s/60);
+  return (neg?'-':'')+String(m).padStart(2,'0')+':'+(s-m*60).toFixed(3).padStart(6,'0');};
+const duration=()=>Math.max(10,(doc.lines.length?doc.lines[doc.lines.length-1].time+4:60));
+const lineEnd=i=>i+1<doc.lines.length?Math.max(doc.lines[i].time+.01,doc.lines[i+1].time):doc.lines[i].time+4;
+function indexAt(time){let lo=0,hi=doc.lines.length;while(lo<hi){const mid=(lo+hi)>>1;if(doc.lines[mid].time<=time)lo=mid+1;else hi=mid;}return lo-1;}
+
+function render(){
+  const idx=indexAt(t);
+  const cur=idx>=0?doc.lines[idx]:null;
+  $('prev').textContent = idx>0?doc.lines[idx-1].text:(idx===-1?'♪  前奏':'');
+  $('next').textContent = (idx<0?0:idx+1)<doc.lines.length?doc.lines[idx<0?0:idx+1].text:'';
+  $('trans').textContent = cur?(cur.translation||''):'';
+
+  if(cur){
+    const arr=[...cur.text];
+    let sung=-1;
+    if(cur.chars.length){ sung=0; for(const off of cur.chars) if(t-cur.time>=off) sung++; else break; }
+    if(cur.chars.length && arr.length){
+      $('current').innerHTML=arr.map((ch,i)=>`<span class="${i<sung?'sung':'todo'}">${ch.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span>`).join('');
+    }else{
+      $('current').textContent=cur.text;
+    }
+    const f=Math.max(0,Math.min(1,(t-cur.time)/Math.max(.01,lineEnd(idx)-cur.time)));
+    $('innerfill').style.width=(f*100)+'%';
+  }else{
+    $('current').innerHTML='<span style="color:var(--faint)">· · ·</span>';
+    $('innerfill').style.width='0%';
+  }
+
+  if(idx!==lastIdx){ $('current').animate([{opacity:.5,transform:'translateY(6px)'},{opacity:1,transform:'none'}],{duration:220,easing:'ease-out'}); lastIdx=idx; }
+  $('counter').textContent=Math.max(0,idx+1)+' / '+doc.lines.length;
+  $('clock').textContent=fmt(t);
+  $('seeklabel').textContent=fmt(t);
+  if(!dragging)$('seek').value=t;
+  $('seek').max=duration();
+  $('status').textContent=(playing?'播放中':'已停止')+' · 预览模式';
+  const ppq=t*2, bar=Math.floor(ppq/4)+1, beat=ppq-(bar-1)*4+1, tick=Math.floor((beat-Math.floor(beat))*960);
+  $('meta').textContent=`小节 ${bar}.${Math.floor(beat)}.${String(tick).padStart(3,'0')} · 120.0 BPM · 4/4`;
+  $('fileinfo').textContent=fileLabel+' · '+doc.format+' · '+doc.lines.length+' 句'+(doc.karaoke?' · 逐字':'');
+}
+
+function flash(msg){const f=$('flash');f.textContent=msg;f.classList.add('show');clearTimeout(f._t);f._t=setTimeout(()=>f.classList.remove('show'),1100);}
+function jump(v,msg){t=Math.max(0,Math.min(duration(),v));last=performance.now();if(msg)flash('已跳转 → '+fmt(t));render();}
+
+function load(text,label){
+  const d=parseLyrics(text);
+  if(!d.lines.length){flash('没有解析到歌词');return;}
+  doc=d;currentRaw=text;fileLabel=label;t=0;lastIdx=-2;last=performance.now();render();
+}
+async function readFile(f){
+  const buf=await f.arrayBuffer(), b=new Uint8Array(buf);
+  let txt;
+  if(b[0]===0xFF&&b[1]===0xFE){ txt=new TextDecoder('utf-16le').decode(buf.slice(2)); }
+  else{
+    try{ txt=new TextDecoder('utf-8',{fatal:true}).decode(buf); }
+    catch(e){ try{ txt=new TextDecoder('gbk').decode(buf); }catch(_){ txt=new TextDecoder('utf-8').decode(buf); } }
+  }
+  load(txt,f.name);
+}
+function loop(now){
+  const dt=last?Math.min(.25,(now-last)/1000):0;last=now;
+  if(playing&&!dragging){t+=dt;if(t>=duration()){t=duration();playing=false;$('play').textContent='▶ 播放';}}
+  render();requestAnimationFrame(loop);}
+
+$('play').onclick=()=>{playing=!playing;$('play').textContent=playing?'❚❚ 暂停':'▶ 播放';last=performance.now();};
+$('m5').onclick=()=>jump(t-5,'jump'); $('p5').onclick=()=>jump(t+5,'jump');
+$('rand').onclick=()=>jump(Math.random()*duration(),'jump');
+document.querySelectorAll('[data-jump]').forEach(b=>b.onclick=()=>jump(Number(b.dataset.jump),'jump'));
+$('seek').addEventListener('pointerdown',()=>dragging=true);
+$('seek').addEventListener('pointerup',()=>{dragging=false;jump(Number($('seek').value));});
+$('seek').addEventListener('input',()=>{t=Number($('seek').value);dragging=true;render();});
+$('seek').addEventListener('change',()=>{dragging=false;jump(Number($('seek').value));});
+$('sample').onclick=()=>load(DEMO,'示例歌词');
+$('karaoke').onclick=()=>load(KARAOKE,'逐字高亮演示');
+$('srt').onclick=()=>load(SRT,'SRT 示例');
+$('file').onchange=e=>{const f=e.target.files[0];if(f)readFile(f);};
+$('paste').onclick=()=>{$('editor').style.display='block';$('textarea').value=currentRaw;};
+$('apply').onclick=()=>{load($('textarea').value,'粘贴的歌词文本');$('editor').style.display='none';};
+$('cancel').onclick=()=>{$('editor').style.display='none';};
+const dz=$('dropzone');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.style.borderColor='var(--accent)';});
+dz.addEventListener('dragleave',()=>dz.style.borderColor='');
+dz.addEventListener('drop',e=>{e.preventDefault();dz.style.borderColor='';const f=e.dataTransfer.files[0];if(f)readFile(f);});
+
+render();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

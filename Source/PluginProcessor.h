@@ -1,0 +1,109 @@
+#pragma once
+
+#include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_data_structures/juce_data_structures.h>
+
+#include "LyricsDocument.h"
+
+#include <atomic>
+
+//==============================================================================
+/** 设置项的 key，编辑器与处理器共用。 */
+namespace Settings
+{
+    inline const juce::Identifier lyricsText { "lyricsText" };
+    inline const juce::Identifier lyricsPath { "lyricsPath" };
+    inline const juce::Identifier offsetMs   { "offsetMs" };
+    inline const juce::Identifier fontScale  { "fontScale" };
+    inline const juce::Identifier theme      { "theme" };
+    inline const juce::Identifier windowW    { "windowW" };
+    inline const juce::Identifier windowH    { "windowH" };
+    inline const juce::Identifier demoClock  { "demoClock" };
+}
+
+//==============================================================================
+/**
+ *  LyricSync 处理器。
+ *
+ *  音频完全直通（不改一个采样），唯一的音频线程工作是从宿主的
+ *  ProcessContext / AudioPlayHead 读取"项目绝对时间"并写入原子变量。
+ *  编辑器只按时间戳查表，不做累加计时，因此：
+ *      · 任意跳转时间码  -> 下一帧立即跟随
+ *      · 循环 / 倒放 / 变速 / 停止  -> 都以宿主播放头为准
+ *      · 工程重新打开    -> 歌词文本随宿主工程一起保存
+ */
+class LyricSyncProcessor : public juce::AudioProcessor
+{
+public:
+    LyricSyncProcessor();
+    ~LyricSyncProcessor() override = default;
+
+    //---- AudioProcessor -----------------------------------------------------
+    void prepareToPlay (double sampleRate, int samplesPerBlock) override;
+    void releaseResources() override;
+
+    bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
+
+    void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    void processBlockBypassed (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+
+    juce::AudioProcessorEditor* createEditor() override;
+    bool hasEditor() const override                 { return true; }
+
+    const juce::String getName() const override    { return "LyricSync"; }
+    bool acceptsMidi() const override              { return false; }
+    bool producesMidi() const override             { return false; }
+    bool isMidiEffect() const override             { return false; }
+    double getTailLengthSeconds() const override   { return 0.0; }
+
+    int getNumPrograms() override                  { return 1; }
+    int getCurrentProgram() override               { return 0; }
+    void setCurrentProgram (int) override          {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
+
+    void getStateInformation (juce::MemoryBlock& destData) override;
+    void setStateInformation (const void* data, int sizeInBytes) override;
+
+    //---- 宿主播放头（音频线程 -> GUI 线程，单向原子传递） --------------------
+    std::atomic<double>      positionSeconds { 0.0 };
+    std::atomic<double>      ppqPosition    { 0.0 };
+    std::atomic<double>      bpm            { 120.0 };
+    std::atomic<double>      hostSampleRate { 48000.0 };
+    std::atomic<juce::int64> timeInSamples  { 0 };
+    std::atomic<int>         timeSigNum     { 4 };
+    std::atomic<int>         timeSigDen     { 4 };
+    std::atomic<bool>        isPlaying      { false };
+    std::atomic<bool>        isRecording    { false };
+    std::atomic<bool>        isLooping      { false };
+    std::atomic<bool>        hasHostTime    { false };
+    std::atomic<juce::uint32> timeUpdates  { 0 };
+
+    //---- 歌词与设置（GUI 线程访问） -----------------------------------------
+    LyricsDocument&       lyrics()       noexcept { return document; }
+    const LyricsDocument& lyrics() const noexcept { return document; }
+
+    /** 解析并替换歌词，同时写入工程状态。返回解析摘要。 */
+    LyricsInfo setLyricsText (const juce::String& text, const juce::String& path = {});
+
+    /** 宿主载入工程后，由编辑器在 GUI 线程调用，避免跨线程改歌词。 */
+    void reloadFromSettings();
+
+    bool consumeStateReloadFlag() noexcept
+    {
+        return stateReloadPending.exchange (false);
+    }
+
+    void   setSetting (const juce::Identifier& key, const juce::var& value);
+    juce::var getSetting (const juce::Identifier& key, const juce::var& fallback) const;
+
+private:
+    LyricsDocument document;
+    juce::ValueTree settings;
+    mutable juce::CriticalSection settingsLock;
+    std::atomic<bool> stateReloadPending { false };
+
+    void readHostTime();
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LyricSyncProcessor)
+};
