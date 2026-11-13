@@ -57,18 +57,19 @@ JUCE 的 `AudioPlayHead::getPosition()` 在 VST3 下读的正是 Steinberg `Proc
 
 工程已自带 `.github/workflows/build-windows.yml`，GitHub 的 Windows 运行器自带 VS2022 + CMake，不需要你装任何开发工具：
 
-1. 在 GitHub 新建一个空仓库（**Public** 仓库 Actions 免费）。
-2. 在本目录执行：
-   ```bash
-   git init
-   git add .
-   git commit -m "LyricSync VST3"
-   git remote add origin https://github.com/<你的用户名>/<仓库名>.git
-   git push -u origin main
-   ```
-   （也可以直接在 GitHub 网页上把整个文件夹拖进去上传，注意要包含 `.github` 目录。）
-3. 打开仓库 → **Actions** → **Build VST3 (Windows)** → **Run workflow**。
-4. 构建完成后在该次运行的页面底部下载 `LyricSync-VST3-Windows-x64`，解压即得到 `LyricSync.vst3` 和 `LyricSync.exe`。
+1. 浏览器打开 **<https://github.com/new>**，新建仓库：名字填 `LyricSync-VST3`，选 **Public**，
+   **不要**勾选 Add a README / .gitignore / license（保持完全空仓库），点绿色 **Create repository**。
+2. 复制新仓库页面上给出的地址（`https://github.com/<用户名>/LyricSync-VST3.git`）。
+3. **双击本目录的 `push-to-github.bat`**，粘贴地址后回车。第一次推送若弹出浏览器登录 GitHub，点授权即可。
+   （等效命令：`git remote add origin <地址>` → `git push -u origin main`；本地仓库已初始化并提交好。）
+4. 推送会**自动触发**编译：打开仓库 → **Actions** → **Build VST3 (Windows)** 查看进度。
+   若没自动开始，点 **Run workflow** 手动触发。
+5. 变绿后在该次运行页面底部 **Artifacts** 下载 `LyricSync-VST3-Windows-x64`，
+   解压即得到 `LyricSync.vst3` 和 `LyricSync.exe`。
+
+> 也可以不上命令行：在 GitHub 网页用 **Add file → Upload files** 上传工程文件，
+> 但务必另外用 **Add file → Create new file** 手工创建 `.github/workflows/build-windows.yml`
+> （隐藏目录在网页拖拽上传时容易被漏掉），内容照抄工程里的同名文件。
 
 ### 方式二：本机一键构建
 
