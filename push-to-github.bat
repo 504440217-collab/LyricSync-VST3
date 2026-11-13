@@ -2,58 +2,72 @@
 setlocal
 cd /d "%~dp0"
 
+set "DEFAULT_REPO=https://github.com/504440217-collab/LyricSync-VST3.git"
+
 echo ==========================================================
 echo   LyricSync VST3 - one click push to GitHub
 echo ==========================================================
 echo.
-echo   Step A: create an EMPTY public repo at https://github.com/new
-echo   Step B: copy its URL, then paste it below.
+echo   First create an EMPTY public repo at https://github.com/new
+echo   Name: LyricSync-VST3   Public   (no README, no .gitignore)
 echo.
 
-if "%~1"=="" (
-  set "REPO="
-  set /p "REPO=Paste repo URL (https://github.com/USER/REPO.git): "
-) else (
-  set "REPO=%~1"
-)
-
-if "%REPO%"=="" (
-  echo [ERROR] No URL entered. Aborted.
-  pause
-  exit /b 1
-)
-
+set "GIT=git"
 where git >nul 2>nul
-if errorlevel 1 (
-  echo [ERROR] git not found in PATH.
+if not errorlevel 1 goto GIT_OK
+
+set "GIT="
+if exist "C:\Users\Muzi\.workbuddy\binaries\PortableGit\versions\1.3.0\cmd\git.exe" set "GIT=C:\Users\Muzi\.workbuddy\binaries\PortableGit\versions\1.3.0\cmd\git.exe"
+if not defined GIT if exist "C:\Program Files\Git\cmd\git.exe" set "GIT=C:\Program Files\Git\cmd\git.exe"
+if not defined GIT if exist "C:\Program Files (x86)\Git\cmd\git.exe" set "GIT=C:\Program Files (x86)\Git\cmd\git.exe"
+if not defined GIT if exist "%LOCALAPPDATA%\Programs\Git\cmd\git.exe" set "GIT=%LOCALAPPDATA%\Programs\Git\cmd\git.exe"
+if not defined GIT (
+  echo [ERROR] Cannot find git.exe. Install Git for Windows, then run again.
   pause
   exit /b 1
 )
 
+:GIT_OK
+echo   git: %GIT%
+echo.
+
+set "REPO=%~1"
+if not defined REPO goto ASK_URL
+goto HAVE_URL
+
+:ASK_URL
+echo   Press ENTER to accept the suggested URL, or paste your own:
+echo   %DEFAULT_REPO%
+set "REPO="
+set /p "REPO=URL: "
+if not defined REPO set "REPO=%DEFAULT_REPO%"
+
+:HAVE_URL
+echo   Using: %REPO%
+echo.
+
+echo [1/4] Committing current files...
 if not exist ".git" (
-  echo [1/4] Initialising local repository...
-  git init -b main
-  git config user.name "LyricSync Build"
-  git config user.email "build@users.noreply.github.com"
-  git add -A
-  git commit -m "LyricSync VST3 source"
-) else (
-  echo [1/4] Committing current files...
-  git add -A
-  git commit -m "Update LyricSync VST3 source" 2>nul
+  "%GIT%" init -b main
+  "%GIT%" config user.name "LyricSync Build"
+  "%GIT%" config user.email "build@users.noreply.github.com"
 )
+"%GIT%" add -A
+"%GIT%" commit -m "LyricSync VST3 source" 2>nul
 
 echo [2/4] Setting remote origin...
-git remote remove origin >nul 2>&1
-git remote add origin %REPO%
-git branch -M main
+"%GIT%" remote remove origin >nul 2>&1
+"%GIT%" remote add origin %REPO%
+"%GIT%" branch -M main
 
 echo [3/4] Pushing to GitHub...
 echo       A browser window may pop up for GitHub sign-in. Please approve it.
-git push -u origin main
+ver >nul
+"%GIT%" push -u origin main
 if errorlevel 1 (
   echo.
   echo [FAILED] Push failed. Check URL / network / login, then run this again.
+  echo       Tip: paste the exact URL shown on your new repo page.
   pause
   exit /b 1
 )

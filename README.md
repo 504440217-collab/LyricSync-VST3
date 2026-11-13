@@ -60,7 +60,8 @@ JUCE 的 `AudioPlayHead::getPosition()` 在 VST3 下读的正是 Steinberg `Proc
 1. 浏览器打开 **<https://github.com/new>**，新建仓库：名字填 `LyricSync-VST3`，选 **Public**，
    **不要**勾选 Add a README / .gitignore / license（保持完全空仓库），点绿色 **Create repository**。
 2. 复制新仓库页面上给出的地址（`https://github.com/<用户名>/LyricSync-VST3.git`）。
-3. **双击本目录的 `push-to-github.bat`**，粘贴地址后回车。第一次推送若弹出浏览器登录 GitHub，点授权即可。
+3. **双击本目录的 `push-to-github.bat`**。脚本已自动定位本机便携版 Git，并预填了默认仓库地址，
+   **直接按回车**即可；若仓库地址不同，粘贴正确地址再回车。第一次推送若弹出浏览器登录 GitHub，点授权即可。
    （等效命令：`git remote add origin <地址>` → `git push -u origin main`；本地仓库已初始化并提交好。）
 4. 推送会**自动触发**编译：打开仓库 → **Actions** → **Build VST3 (Windows)** 查看进度。
    若没自动开始，点 **Run workflow** 手动触发。
