@@ -2,6 +2,8 @@ name: Build VST3 (Windows)
 
 # 本机没有 Visual Studio 时，用 GitHub 免费托管的 Windows runner 编译：
 # 仓库 -> Actions -> Build VST3 (Windows) -> Run workflow -> 下载 artifact。
+# 注意：windows-latest 在 2026 年已切换到 windows-2025-vs2026，
+# 只有 VS 2026 (v18)，因此不能写死 "Visual Studio 17 2022"。
 on:
   workflow_dispatch:
   push:
@@ -13,15 +15,40 @@ on:
 
 jobs:
   build-windows:
-    runs-on: windows-latest      # 自带 VS 2022 / CMake / Git，无需额外安装
+    runs-on: windows-latest      # 自带 VS / CMake / Git，无需额外安装
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure (JUCE 7.0.12 由 CMake 自动拉取)
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+      - name: Configure (auto-detect generator)
         shell: pwsh
+        run: |
+          cmake --version
+          $helpText = (cmake --help) -join "`n"
+          # v143 = VS2022 的 MSVC 工具集，JUCE 7.0.12 对它兼容性最好；
+          # 优先尝试它，再退回到生成器默认工具集 / 旧生成器 / Ninja。
+          $attempts = @(
+            @{ g = 'Visual Studio 18 2026'; extra = @('-A','x64','-T','v143') },
+            @{ g = 'Visual Studio 18 2026'; extra = @('-A','x64') },
+            @{ g = 'Visual Studio 17 2022'; extra = @('-A','x64') },
+            @{ g = 'Ninja';                 extra = @() }
+          )
+          foreach ($a in $attempts) {
+            if ($helpText -notmatch ([regex]::Escape($a.g))) { continue }
+            if (Test-Path build) { Remove-Item -Recurse -Force build }
+            Write-Host "::group::Trying generator: $($a.g) $($a.extra -join ' ')"
+            $cmakeArgs = @('-S','.','-B','build','-G',$a.g) + $a.extra + @('-DCMAKE_POLICY_VERSION_MINIMUM=3.5')
+            & cmake @cmakeArgs
+            $rc = $LASTEXITCODE
+            Write-Host "::endgroup::"
+            if ($rc -eq 0) {
+              Write-Host "CONFIGURE_OK with generator $($a.g) $($a.extra -join ' ')"
+              exit 0
+            }
+            Write-Host "Generator $($a.g) $($a.extra -join ' ') failed (exit $rc), trying next"
+          }
+          throw 'No usable CMake generator found on this runner'
 
       - name: Build Release
         run: cmake --build build --config Release --parallel 4

@@ -60,8 +60,12 @@ echo [2/4] Setting remote origin...
 "%GIT%" remote add origin %REPO%
 "%GIT%" branch -M main
 
+set "SYS_PROXY=127.0.0.1:10808"
+for /f "tokens=2*" %%A in ('reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyServer 2^>nul') do if not "%%B"=="" set "SYS_PROXY=%%B"
+set "PROXY_ARGS=-c http.proxy=http://%SYS_PROXY% -c https.proxy=http://%SYS_PROXY%"
+
 echo [2b/4] Reconciling remote history (avoids "fetch first" rejections)...
-"%GIT%" fetch origin main >nul 2>&1
+"%GIT%" %PROXY_ARGS% fetch origin main >nul 2>&1
 if not errorlevel 1 (
   "%GIT%" merge --allow-unrelated-histories -s ours origin/main -m "Merge remote starter files" >nul 2>&1
 )
@@ -69,15 +73,22 @@ if not errorlevel 1 (
 echo [3/4] Pushing to GitHub...
 echo       A browser window may pop up for GitHub sign-in. Please approve it.
 ver >nul
-"%GIT%" push -u origin main
-if errorlevel 1 (
-  echo.
-  echo [FAILED] Push failed. Check URL / network / login, then run this again.
-  echo       Tip: paste the exact URL shown on your new repo page.
-  pause
-  exit /b 1
-)
+"%GIT%" %PROXY_ARGS% push -u origin main
+if not errorlevel 1 goto PUSH_OK
 
+echo       Direct push failed, retrying without proxy...
+ver >nul
+"%GIT%" push -u origin main
+if not errorlevel 1 goto PUSH_OK
+
+echo.
+echo [FAILED] Push failed. Check URL / network / login, then run this again.
+echo       Windows system proxy detected: %SYS_PROXY%
+echo       Tip: paste the exact URL shown on your new repo page.
+pause
+exit /b 1
+
+:PUSH_OK
 echo [4/4] Push succeeded.
 echo.
 echo   Now open your repo and click the "Actions" tab.
