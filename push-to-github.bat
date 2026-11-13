@@ -60,6 +60,12 @@ echo [2/4] Setting remote origin...
 "%GIT%" remote add origin %REPO%
 "%GIT%" branch -M main
 
+echo [2b/4] Reconciling remote history (avoids "fetch first" rejections)...
+"%GIT%" fetch origin main >nul 2>&1
+if not errorlevel 1 (
+  "%GIT%" merge --allow-unrelated-histories -s ours origin/main -m "Merge remote starter files" >nul 2>&1
+)
+
 echo [3/4] Pushing to GitHub...
 echo       A browser window may pop up for GitHub sign-in. Please approve it.
 ver >nul
