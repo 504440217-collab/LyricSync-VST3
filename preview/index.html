@@ -28,6 +28,9 @@
   .brand{font-size:19px;font-weight:700;letter-spacing:.3px}
   .sub{font-size:11px;color:var(--faint);margin-top:3px}
   .clock{margin-left:auto;text-align:right}
+  #lang{background:var(--panel);color:var(--text);border:1px solid var(--edge);border-radius:9px;
+        padding:6px 8px;font-size:12px;font-family:inherit;cursor:pointer;outline:none}
+  #lang:hover{border-color:var(--accent2)}
   #clock{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:1px}
   #status{font-size:11px;color:var(--dim);margin-top:2px}
   .stage{margin:18px 22px;height:290px;background:var(--card);border:1px solid rgba(90,105,145,.32);
@@ -79,14 +82,18 @@
 <div class="wrap">
   <div class="banner">
     <span>◈</span>
-    <div><b>界面预览 / 歌词校对工具</b>　这是浏览器里的交互演示，不是 VST3 插件本体。插件请编译 <code>CMakeLists.txt</code> 工程。这里的时间轴由网页模拟，用来验证「任意跳转时间码，歌词立即跟随」的效果与歌词时间点。</div>
+    <div id="bannertext"></div>
   </div>
 
   <div class="plugin" id="dropzone">
     <header>
       <div class="logo"><i></i><i></i></div>
-      <div><div class="brand">LyricSync</div><div class="sub">DAW 歌词同步 · 跟随宿主播放头</div></div>
+      <div><div class="brand">LyricSync</div><div class="sub" data-t="sub"></div></div>
       <div class="clock"><div id="clock">00:00.000</div><div id="status">已停止 · 预览模式</div></div>
+      <select id="lang" aria-label="UI language">
+        <option value="zh">中文</option>
+        <option value="en">English</option>
+      </select>
     </header>
 
     <div class="stage" id="stage">
@@ -108,30 +115,27 @@
         <button class="primary" id="play">▶ 播放</button>
         <button id="m5">−5s</button><button id="p5">+5s</button>
         <div class="sep"></div>
-        <button data-jump="0">跳到 0s</button>
+        <button data-jump="0" data-t="jump0"></button>
         <button data-jump="12">12s</button>
         <button data-jump="40">40s</button>
-        <button id="rand">随机跳转</button>
+        <button id="rand" data-t="rand"></button>
         <div class="sep"></div>
-        <label class="filebtn">导入歌词<input type="file" id="file" accept=".lrc,.srt,.txt,.vtt" hidden></label>
-        <button id="paste">粘贴 / 编辑</button>
-        <button id="sample">示例 LRC</button>
-        <button id="karaoke">逐字示例</button>
-        <button id="srt">SRT 示例</button>
-        <span class="hint">也可直接把 .lrc 拖到窗口</span>
+        <label class="filebtn"><span data-t="import"></span><input type="file" id="file" accept=".lrc,.srt,.txt,.vtt" hidden></label>
+        <button id="paste" data-t="paste"></button>
+        <button id="sample" data-t="sample"></button>
+        <button id="karaoke" data-t="karaoke"></button>
+        <button id="srt" data-t="srt"></button>
+        <span class="hint" data-t="hint"></span>
       </div>
       <div class="metarow"><span id="fileinfo">示例歌词 · LRC</span><span id="meta">小节 1.1.000 · 120.0 BPM · 4/4</span></div>
     </div>
 
     <div id="editor">
-      <textarea id="textarea" spellcheck="false" placeholder="在这里粘贴 LRC / SRT 歌词文本…"></textarea>
-      <div class="editactions"><button class="primary" id="apply">应用歌词</button><button id="cancel">取消</button></div>
+      <textarea id="textarea" spellcheck="false"></textarea>
+      <div class="editactions"><button class="primary" id="apply" data-t="apply"></button><button id="cancel" data-t="cancel"></button></div>
     </div>
 
-    <footer>
-      演示操作：<kbd>播放</kbd> 后拖动进度条、点 <kbd>12s</kbd> / <kbd>40s</kbd> / <kbd>随机跳转</kbd>，歌词会在同一帧切到对应句子 —— 这正是 VST3 插件读取宿主 <code>projectTimeSamples</code> 后的行为。<br>
-      真实插件里时间来自 DAW 播放头，这里用网页时钟模拟；歌词解析、二分查找、逐字高亮的逻辑与插件源码一致。
-    </footer>
+    <footer id="footer"></footer>
   </div>
 </div>
 
@@ -178,6 +182,81 @@ SRT 字幕也能直接拖进插件窗口
 4
 00:00:15,000 --> 00:00:20,000
 循环与倒退同样不会错位`;
+
+const DEMO_EN = `[ti:LyricSync Demo Lyrics]
+[ar:Muzi Audio Tools]
+
+[00:00.00]LyricSync - synced lyrics display
+[00:04.00]Drop a .lrc file into the window
+[00:08.50]Move the playhead anywhere
+[00:12.00]The lyrics follow instantly
+[00:15.50]Stop, rewind or loop - never out of sync
+[00:20.00]It reads the host project time
+[00:24.50]Not a timer inside the plugin
+[00:29.00]Try jumping to 00:40
+[00:33.00]The next line appears right away
+[00:37.00]Jump back to 00:12, still works
+[00:40.00]You reached 40 seconds - this line is lit
+[00:45.00]Fine-tune the offset below
+[00:50.00]Or paste your own lyrics text
+[00:55.00]LRC / word-timed LRC / SRT / plain text
+[01:00.00]Happy recording`;
+
+const KARAOKE_EN = `[ti:Word highlight demo]
+[00:03.00]T<00:03.00>h<00:03.25>i<00:03.50>s<00:03.75> <00:04.00>l<00:04.25>i<00:04.50>n<00:04.75>e<00:05.00> <00:05.25>l<00:05.50>i<00:05.75>g<00:06.00>h<00:06.25>t<00:06.50>s<00:06.75> <00:07.00>u<00:07.25>p<00:07.50>
+[00:09.00]M<00:09.00>o<00:09.30>v<00:09.60>e<00:09.90> <00:10.20>t<00:10.50>h<00:10.80>e<00:11.10> <00:11.40>p<00:11.70>l<00:12.00>a<00:12.30>y<00:12.60>h<00:12.90>e<00:13.20>a<00:13.50>d<00:13.80>
+[00:15.00]L<00:15.00>y<00:15.35>r<00:15.70>i<00:16.05>c<00:16.40>s<00:16.75> <00:17.10>s<00:17.45>t<00:17.80>a<00:18.15>y<00:18.50> <00:18.85>i<00:19.20>n<00:19.55> <00:19.90>s<00:20.25>y<00:20.60>n<00:20.95>c
+[00:22.00]S<00:22.00>e<00:22.40>e<00:22.80>k<00:23.20>i<00:23.60>n<00:24.00>g<00:24.40> <00:24.80>a<00:25.20>n<00:25.60>d<00:26.00> <00:26.40>l<00:26.80>o<00:27.20>o<00:27.60>p<00:28.00>i<00:28.40>n<00:28.80>g`;
+
+const SRT_EN = `1
+00:00:02,000 --> 00:00:06,000
+SRT subtitles work too
+
+2
+00:00:06,000 --> 00:00:10,500
+Timecode comes from the host playhead
+
+3
+00:00:10,500 --> 00:00:15,000
+Jump anywhere - lyrics align instantly
+
+4
+00:00:15,000 --> 00:00:20,000
+Looping and rewinding work as well`;
+
+const TXT = {
+  zh:{
+    title:'LyricSync · 界面预览 / 歌词校对',
+    banner:'<b>界面预览 / 歌词校对工具</b>　这是浏览器里的交互演示，不是 VST3 插件本体。插件请编译 <code>CMakeLists.txt</code> 工程。这里的时间轴由网页模拟，用来验证「任意跳转时间码，歌词立即跟随」的效果与歌词时间点。',
+    footer:'演示操作：<kbd>播放</kbd> 后拖动进度条、点 <kbd>12s</kbd> / <kbd>40s</kbd> / <kbd>随机跳转</kbd>，歌词会在同一帧切到对应句子 —— 这正是 VST3 插件读取宿主 <code>projectTimeSamples</code> 后的行为。<br>真实插件里时间来自 DAW 播放头，这里用网页时钟模拟；歌词解析、二分查找、逐字高亮的逻辑与插件源码一致。',
+    sub:'DAW 歌词同步 · 跟随宿主播放头',
+    jump0:'跳到 0s', rand:'随机跳转', import:'导入歌词', paste:'粘贴 / 编辑',
+    sample:'示例 LRC', karaoke:'逐字示例', srt:'SRT 示例', hint:'也可直接把 .lrc 拖到窗口',
+    apply:'应用歌词', cancel:'取消', placeholder:'在这里粘贴 LRC / SRT 歌词文本…',
+    play:'▶ 播放', pause:'❚❚ 暂停',
+    intro:'♪  前奏', statusPlay:'播放中', statusStop:'已停止', preview:'预览模式',
+    bar:'小节', lines:'句', word:'逐字',
+    labelPaste:'粘贴的歌词文本', empty:'没有解析到歌词', jumped:'已跳转 → '
+  },
+  en:{
+    title:'LyricSync - UI preview / lyrics checker',
+    banner:'<b>UI preview / lyrics checker</b>&nbsp;&nbsp;This is an interactive browser demo, not the VST3 plugin. Build the plugin from <code>CMakeLists.txt</code>. The timeline here is simulated to demonstrate that lyrics follow any playhead jump instantly.',
+    footer:'Try it: press <kbd>Play</kbd>, then drag the slider or click <kbd>12s</kbd> / <kbd>40s</kbd> / <kbd>Random</kbd> - the current line switches in the same frame, exactly like the VST3 plugin reading the host <code>projectTimeSamples</code>.<br>In the real plugin the time comes from the DAW playhead; this page simulates it. Lyrics parsing, binary search and word highlighting match the plugin source.',
+    sub:'DAW lyrics - follows the host playhead',
+    jump0:'Go to 0s', rand:'Random jump', import:'Import lyrics', paste:'Paste / Edit',
+    sample:'Demo LRC', karaoke:'Word timing', srt:'SRT sample', hint:'or drop a .lrc file here',
+    apply:'Apply', cancel:'Cancel', placeholder:'Paste LRC / SRT lyrics here…',
+    play:'▶ Play', pause:'❚❚ Pause',
+    intro:'♪  Intro', statusPlay:'Playing', statusStop:'Stopped', preview:'Preview mode',
+    bar:'Bar', lines:'lines', word:'karaoke',
+    labelPaste:'Pasted lyrics', empty:'No lyrics found', jumped:'Jumped to '
+  }
+};
+const SAMPLES = {
+  demo:    {zh:[DEMO,'示例歌词'],       en:[DEMO_EN,'Demo Lyrics']},
+  karaoke: {zh:[KARAOKE,'逐字高亮演示'], en:[KARAOKE_EN,'Word highlight demo']},
+  srt:     {zh:[SRT,'SRT 示例'],        en:[SRT_EN,'SRT sample']}
+};
 
 function parseClock(s){
   s = s.trim().replace(/,/g,'.');
@@ -269,7 +348,8 @@ function parseLyrics(raw){
 }
 
 let doc=parseLyrics(DEMO), t=0, playing=false, last=0, lastIdx=-2, dragging=false;
-let fileLabel='示例歌词 · LRC', currentRaw=DEMO;
+let fileLabel='示例歌词', currentRaw=DEMO, builtinKey='demo';
+let lang='zh', T=TXT.zh;
 
 const $=id=>document.getElementById(id);
 const fmt=s=>{const neg=s<0;s=Math.abs(s);const m=Math.floor(s/60);
@@ -281,7 +361,7 @@ function indexAt(time){let lo=0,hi=doc.lines.length;while(lo<hi){const mid=(lo+h
 function render(){
   const idx=indexAt(t);
   const cur=idx>=0?doc.lines[idx]:null;
-  $('prev').textContent = idx>0?doc.lines[idx-1].text:(idx===-1?'♪  前奏':'');
+  $('prev').textContent = idx>0?doc.lines[idx-1].text:(idx===-1?T.intro:'');
   $('next').textContent = (idx<0?0:idx+1)<doc.lines.length?doc.lines[idx<0?0:idx+1].text:'';
   $('trans').textContent = cur?(cur.translation||''):'';
 
@@ -307,20 +387,37 @@ function render(){
   $('seeklabel').textContent=fmt(t);
   if(!dragging)$('seek').value=t;
   $('seek').max=duration();
-  $('status').textContent=(playing?'播放中':'已停止')+' · 预览模式';
+  $('status').textContent=(playing?T.statusPlay:T.statusStop)+' · '+T.preview;
   const ppq=t*2, bar=Math.floor(ppq/4)+1, beat=ppq-(bar-1)*4+1, tick=Math.floor((beat-Math.floor(beat))*960);
-  $('meta').textContent=`小节 ${bar}.${Math.floor(beat)}.${String(tick).padStart(3,'0')} · 120.0 BPM · 4/4`;
-  $('fileinfo').textContent=fileLabel+' · '+doc.format+' · '+doc.lines.length+' 句'+(doc.karaoke?' · 逐字':'');
+  $('meta').textContent=`${T.bar} ${bar}.${Math.floor(beat)}.${String(tick).padStart(3,'0')} · 120.0 BPM · 4/4`;
+  $('fileinfo').textContent=fileLabel+' · '+doc.format+' · '+doc.lines.length+' '+T.lines+(doc.karaoke?' · '+T.word:'');
+}
+
+function applyLang(v){
+  lang=v;T=TXT[v];
+  document.documentElement.lang=(v==='zh'?'zh-CN':'en');
+  document.title=T.title;
+  $('bannertext').innerHTML=T.banner;
+  $('footer').innerHTML=T.footer;
+  $('textarea').placeholder=T.placeholder;
+  document.querySelectorAll('[data-t]').forEach(el=>{el.textContent=T[el.dataset.t]||el.dataset.t;});
+  $('play').textContent=playing?T.pause:T.play;
+  if(builtinKey){
+    const [text,label]=SAMPLES[builtinKey][v];
+    doc=parseLyrics(text);currentRaw=text;fileLabel=label;lastIdx=-2;
+  }
+  render();
 }
 
 function flash(msg){const f=$('flash');f.textContent=msg;f.classList.add('show');clearTimeout(f._t);f._t=setTimeout(()=>f.classList.remove('show'),1100);}
-function jump(v,msg){t=Math.max(0,Math.min(duration(),v));last=performance.now();if(msg)flash('已跳转 → '+fmt(t));render();}
+function jump(v,msg){t=Math.max(0,Math.min(duration(),v));last=performance.now();if(msg)flash(T.jumped+fmt(t));render();}
 
 function load(text,label){
   const d=parseLyrics(text);
-  if(!d.lines.length){flash('没有解析到歌词');return;}
+  if(!d.lines.length){flash(T.empty);return;}
   doc=d;currentRaw=text;fileLabel=label;t=0;lastIdx=-2;last=performance.now();render();
 }
+function loadSample(key){builtinKey=key;const [text,label]=SAMPLES[key][lang];load(text,label);}
 async function readFile(f){
   const buf=await f.arrayBuffer(), b=new Uint8Array(buf);
   let txt;
@@ -329,14 +426,14 @@ async function readFile(f){
     try{ txt=new TextDecoder('utf-8',{fatal:true}).decode(buf); }
     catch(e){ try{ txt=new TextDecoder('gbk').decode(buf); }catch(_){ txt=new TextDecoder('utf-8').decode(buf); } }
   }
-  load(txt,f.name);
+  builtinKey=null;load(txt,f.name);
 }
 function loop(now){
   const dt=last?Math.min(.25,(now-last)/1000):0;last=now;
-  if(playing&&!dragging){t+=dt;if(t>=duration()){t=duration();playing=false;$('play').textContent='▶ 播放';}}
+  if(playing&&!dragging){t+=dt;if(t>=duration()){t=duration();playing=false;$('play').textContent=T.play;}}
   render();requestAnimationFrame(loop);}
 
-$('play').onclick=()=>{playing=!playing;$('play').textContent=playing?'❚❚ 暂停':'▶ 播放';last=performance.now();};
+$('play').onclick=()=>{playing=!playing;$('play').textContent=playing?T.pause:T.play;last=performance.now();};
 $('m5').onclick=()=>jump(t-5,'jump'); $('p5').onclick=()=>jump(t+5,'jump');
 $('rand').onclick=()=>jump(Math.random()*duration(),'jump');
 document.querySelectorAll('[data-jump]').forEach(b=>b.onclick=()=>jump(Number(b.dataset.jump),'jump'));
@@ -344,19 +441,20 @@ $('seek').addEventListener('pointerdown',()=>dragging=true);
 $('seek').addEventListener('pointerup',()=>{dragging=false;jump(Number($('seek').value));});
 $('seek').addEventListener('input',()=>{t=Number($('seek').value);dragging=true;render();});
 $('seek').addEventListener('change',()=>{dragging=false;jump(Number($('seek').value));});
-$('sample').onclick=()=>load(DEMO,'示例歌词');
-$('karaoke').onclick=()=>load(KARAOKE,'逐字高亮演示');
-$('srt').onclick=()=>load(SRT,'SRT 示例');
+$('sample').onclick=()=>loadSample('demo');
+$('karaoke').onclick=()=>loadSample('karaoke');
+$('srt').onclick=()=>loadSample('srt');
 $('file').onchange=e=>{const f=e.target.files[0];if(f)readFile(f);};
 $('paste').onclick=()=>{$('editor').style.display='block';$('textarea').value=currentRaw;};
-$('apply').onclick=()=>{load($('textarea').value,'粘贴的歌词文本');$('editor').style.display='none';};
+$('apply').onclick=()=>{builtinKey=null;load($('textarea').value,T.labelPaste);$('editor').style.display='none';};
 $('cancel').onclick=()=>{$('editor').style.display='none';};
+$('lang').onchange=e=>applyLang(e.target.value);
 const dz=$('dropzone');
 dz.addEventListener('dragover',e=>{e.preventDefault();dz.style.borderColor='var(--accent)';});
 dz.addEventListener('dragleave',()=>dz.style.borderColor='');
 dz.addEventListener('drop',e=>{e.preventDefault();dz.style.borderColor='';const f=e.dataTransfer.files[0];if(f)readFile(f);});
 
-render();requestAnimationFrame(loop);
+applyLang('zh');requestAnimationFrame(loop);
 </script>
 </body>
 </html>
