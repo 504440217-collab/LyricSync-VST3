@@ -55,7 +55,9 @@ JUCE 的 `AudioPlayHead::getPosition()` 在 VST3 下读的正是 Steinberg `Proc
 
 ### 方式一：零本地环境云编译（推荐给没有 Visual Studio 的电脑）
 
-工程已自带 `.github/workflows/build-windows.yml`，GitHub 的 Windows 运行器自带 VS2022 + CMake，不需要你装任何开发工具：
+工程已自带 `.github/workflows/build-windows.yml`，GitHub 的 Windows 运行器自带 Visual Studio 与 CMake，不需要你装任何开发工具。
+工作流会**自动探测生成器**：2026 年 `windows-latest` 已换成 `windows-2025-vs2026`（只有 VS 2026 / CMake 4.x），
+因此优先用 `Visual Studio 18 2026 -T v143`，再依次回退到 18 默认工具集 / VS 2022 / Ninja，不会再出现写死生成器导致的失败：
 
 1. 浏览器打开 **<https://github.com/new>**，新建仓库：名字填 `LyricSync-VST3`，选 **Public**，
    **不要**勾选 Add a README / .gitignore / license（保持完全空仓库），点绿色 **Create repository**。
@@ -63,6 +65,8 @@ JUCE 的 `AudioPlayHead::getPosition()` 在 VST3 下读的正是 Steinberg `Proc
 3. **双击本目录的 `push-to-github.bat`**。脚本已自动定位本机便携版 Git，并预填了默认仓库地址，
    **直接按回车**即可；若仓库地址不同，粘贴正确地址再回车。第一次推送若弹出浏览器登录 GitHub，点授权即可。
    （等效命令：`git remote add origin <地址>` → `git push -u origin main`；本地仓库已初始化并提交好。）
+   > 国内网络常见 `Failed to connect to github.com:443`：Git 默认不读 Windows 系统代理。
+   > 脚本会自动读取注册表中的系统代理（本机为 `127.0.0.1:10808`）并带上 `http.proxy` 重试，无需手工配置。
    > 若新建仓库时 GitHub 自动放了 `.github/workflows/blank.yml`（或勾了 README），首次推送会报
    > `! [rejected] main -> main (fetch first)`。这不是密码错误，只是远程多了一个初始提交。
    > 脚本会自动 `fetch` + 合并远程历史（保留本工程文件、丢弃那个无用的 CI 模板），再重新推送；
