@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.7.0";
+    const char* const kVersion = "1.7.1";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -443,6 +443,8 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
                      &applyTextButton, &cancelTextButton,
                      &tapStartButton, &tapUndoButton, &tapFinishButton, &tapExitButton,
                      &tapRestartButton, &tapNudgeBackButton, &tapNudgeFwdButton, &tapPauseButton,
+                     &tapHostTransportButton,
+                     &tapRowRestampButton, &tapRowApplyButton, &tapRowCancelButton,
                      &measureButton, &exportButton, &retempoButton, &demoClockToggle,
                      &orientHButton, &orientVButton, &pickImageButton, &clearImageButton,
                      &hintToggle })
@@ -488,6 +490,20 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     hintLabel.addMouseListener (this, false);      // 点提示词 -> 换下一条
     addLabel (fontLabel,   11.0f, false, juce::Justification::centredLeft);
     addLabel (audioLabel,  11.5f, false, juce::Justification::centredRight);
+
+    for (auto* ed : { &tapTextEditor, &tapTimeEditor })
+    {
+        ed->setMultiLine (false);
+        ed->setReturnKeyStartsNewLine (false);
+        ed->setScrollbarsShown (false);
+        ed->setJustification (juce::Justification::centredLeft);
+        ed->onReturnKey = [this] { applyTapRow(); };
+        ed->onEscapeKey = [this] { closeTapRowEditing(); };
+        addChildComponent (*ed);
+    }
+
+    tapTextEditor.setTextToShowWhenEmpty (tr (Lang::TextId::tapRowText), juce::Colours::grey);
+    tapTimeEditor.setTextToShowWhenEmpty ("00:00.00", juce::Colours::grey);
 
     editorBox.setMultiLine (true, true);
     editorBox.setReturnKeyStartsNewLine (true);
@@ -710,6 +726,11 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     tapNudgeFwdButton .setButtonText (tr (Lang::TextId::tapNudgeFwd));
     tapPauseButton    .setButtonText (tr (demoPlaying ? Lang::TextId::tapPause
                                                      : Lang::TextId::tapResume));
+    tapHostTransportButton.setButtonText (tr (processor.isPlaying.load() ? Lang::TextId::tapHostPause
+                                                                       : Lang::TextId::tapHostPlay));
+    tapRowRestampButton.setButtonText (tr (Lang::TextId::tapRowRestamp));
+    tapRowApplyButton .setButtonText (tr (Lang::TextId::tapRowApply));
+    tapRowCancelButton.setButtonText (tr (Lang::TextId::cancel));
     measureButton   .setButtonText (tr (Lang::TextId::measureAudio));
     exportButton    .setButtonText (tr (Lang::TextId::exportLrc));
     retempoButton   .setButtonText (tr (Lang::TextId::retempo));
@@ -790,6 +811,8 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     tapNudgeBackButton.setTooltip (tr (Lang::TextId::tipTapNudge));
     tapNudgeFwdButton .setTooltip (tr (Lang::TextId::tipTapNudge));
     tapPauseButton    .setTooltip (tr (Lang::TextId::tipTapPause));
+    tapHostTransportButton.setTooltip (tr (Lang::TextId::tipTapHost));
+    tapRowRestampButton.setTooltip (tr (Lang::TextId::tipTapRowRestamp));
     measureButton   .setTooltip (tr (Lang::TextId::tipMeasure));
     exportButton    .setTooltip (tr (Lang::TextId::tipExport));
     retempoButton   .setTooltip (tr (Lang::TextId::tipRetempo));
@@ -928,14 +951,24 @@ void LyricSyncEditor::updateVisibility()
     cancelTextButton.setVisible (editing && ! overlay);
     tapStartButton  .setVisible (editing && ! overlay);
 
-    tapUndoButton   .setVisible (tapMode && ! overlay);
-    tapRestartButton.setVisible (tapMode && ! overlay);
-    tapNudgeBackButton.setVisible (tapMode && ! overlay);
-    tapNudgeFwdButton .setVisible (tapMode && ! overlay);
-    tapPauseButton    .setVisible (tapMode && ! overlay && demoMode);
-    tapFinishButton .setVisible (tapMode && ! overlay);
-    tapExitButton   .setVisible (tapMode && ! overlay);
+    const bool tapMain = tapMode && ! overlay && tapEditIndex < 0;
 
+    tapUndoButton   .setVisible (tapMain);
+    tapRestartButton.setVisible (tapMain);
+    tapNudgeBackButton.setVisible (tapMain);
+    tapNudgeFwdButton .setVisible (tapMain);
+    tapPauseButton    .setVisible (tapMain && demoMode);
+    tapHostTransportButton.setVisible (tapMain);
+    tapFinishButton .setVisible (tapMain);
+    tapExitButton   .setVisible (tapMain);
+
+    const bool rowEdit = tapMode && ! overlay && tapEditIndex >= 0;
+
+    tapTextEditor   .setVisible (rowEdit);
+    tapTimeEditor   .setVisible (rowEdit);
+    tapRowRestampButton.setVisible (rowEdit);
+    tapRowApplyButton  .setVisible (rowEdit);
+    tapRowCancelButton .setVisible (rowEdit);
     for (auto* c : { static_cast<juce::Component*> (&languageBox),
                      static_cast<juce::Component*> (&advanceBox),
                      static_cast<juce::Component*> (&zoomBox),
@@ -972,7 +1005,7 @@ juce::Rectangle<float> LyricSyncEditor::stageArea() const
         return { 10.0f, 10.0f, baseW() - 20.0f, baseH() - 20.0f };
 
     if (orientation == Orientation::vertical)
-        return { 22.0f, 72.0f, vBaseW - 44.0f, 556.0f };
+        return { vShift() + 22.0f, 72.0f, baseW() - 44.0f, 556.0f };
 
     return { 22.0f, 72.0f, hBaseW - 44.0f, 394.0f };
 }
@@ -980,7 +1013,7 @@ juce::Rectangle<float> LyricSyncEditor::stageArea() const
 juce::Rectangle<float> LyricSyncEditor::settingsPanelArea() const
 {
     if (orientation == Orientation::vertical)
-        return { 40.0f, 150.0f, 520.0f, 540.0f };
+        return { vShift() + 40.0f, 150.0f, 520.0f, 540.0f };
 
     return { 200.0f, 66.0f, 560.0f, 470.0f };
 }
@@ -1076,6 +1109,8 @@ void LyricSyncEditor::resized()
             place (tapNudgeBackButton, 62);
             place (tapNudgeFwdButton, 62);
             x += 6.0f;
+            place (tapHostTransportButton, 92);
+            x += 6.0f;
             place (tapPauseButton, 84);
             x += 6.0f;
             place (tapFinishButton, 84);
@@ -1110,52 +1145,55 @@ void LyricSyncEditor::resized()
     }
     else
     {
-        gearButton   .setBounds (scaledRect (532, 12, 46, 46));
+        const float ox = vShift();
+
+        gearButton   .setBounds (scaledRect (baseW() - 68.0f, 12, 46, 46));
 
         editorBox.setBounds (scaledRect (stage.getX() + 2.0f, stage.getY() + 2.0f,
                                          stage.getWidth() - 4.0f, stage.getHeight() - 4.0f));
 
         if (editing)
         {
-            applyTextButton .setBounds (scaledRect (22, 646, 176, 30));
-            cancelTextButton.setBounds (scaledRect (206, 646, 176, 30));
-            tapStartButton  .setBounds (scaledRect (390, 646, 176, 30));
+            applyTextButton .setBounds (scaledRect (ox + 22, 646, 176, 30));
+            cancelTextButton.setBounds (scaledRect (ox + 206, 646, 176, 30));
+            tapStartButton  .setBounds (scaledRect (ox + 390, 646, 176, 30));
         }
         else if (tapMode)
         {
-            tapUndoButton      .setBounds (scaledRect (22, 646, 176, 30));
-            tapRestartButton   .setBounds (scaledRect (206, 646, 176, 30));
-            tapFinishButton    .setBounds (scaledRect (390, 646, 176, 30));
+            tapUndoButton      .setBounds (scaledRect (ox + 22, 646, 168, 30));
+            tapRestartButton   .setBounds (scaledRect (ox + 198, 646, 168, 30));
+            tapFinishButton    .setBounds (scaledRect (ox + 374, 646, 168, 30));
 
-            tapNudgeBackButton .setBounds (scaledRect (22, 682, 124, 30));
-            tapNudgeFwdButton  .setBounds (scaledRect (156, 682, 124, 30));
-            tapPauseButton     .setBounds (scaledRect (290, 682, 132, 30));
-            tapExitButton      .setBounds (scaledRect (432, 682, 146, 30));
+            tapNudgeBackButton .setBounds (scaledRect (ox + 22, 682, 96, 30));
+            tapNudgeFwdButton  .setBounds (scaledRect (ox + 126, 682, 96, 30));
+            tapPauseButton     .setBounds (scaledRect (ox + 230, 682, 104, 30));
+            tapHostTransportButton.setBounds (scaledRect (ox + 342, 682, 124, 30));
+            tapExitButton      .setBounds (scaledRect (ox + 474, 682, 84, 30));
         }
         else
         {
-            loadButton .setBounds (scaledRect (22, 644, 176, 30));
-            pasteButton.setBounds (scaledRect (206, 644, 176, 30));
-            demoButton .setBounds (scaledRect (390, 644, 176, 30));
+            loadButton .setBounds (scaledRect (ox + 22, 644, 176, 30));
+            pasteButton.setBounds (scaledRect (ox + 206, 644, 176, 30));
+            demoButton .setBounds (scaledRect (ox + 390, 644, 176, 30));
 
-            minusButton .setBounds (scaledRect (22, 682, 56, 30));
-            offsetLabel .setBounds (scaledRect (86, 682, 120, 30));
-            plusButton  .setBounds (scaledRect (214, 682, 56, 30));
-            resetButton .setBounds (scaledRect (278, 682, 96, 30));
-            fontLabel   .setBounds (scaledRect (382, 686, 40, 22));
-            fontSlider  .setBounds (scaledRect (426, 686, 140, 22));
+            minusButton .setBounds (scaledRect (ox + 22, 682, 56, 30));
+            offsetLabel .setBounds (scaledRect (ox + 86, 682, 120, 30));
+            plusButton  .setBounds (scaledRect (ox + 214, 682, 56, 30));
+            resetButton .setBounds (scaledRect (ox + 278, 682, 96, 30));
+            fontLabel   .setBounds (scaledRect (ox + 382, 686, 40, 22));
+            fontSlider  .setBounds (scaledRect (ox + 426, 686, 140, 22));
 
-            demoClockToggle.setBounds (scaledRect (22, 720, 176, 30));
-            demoPlayButton .setBounds (scaledRect (206, 720, 60, 30));
-            demoStopButton .setBounds (scaledRect (274, 720, 60, 30));
-            measureButton  .setBounds (scaledRect (342, 720, 150, 30));
+            demoClockToggle.setBounds (scaledRect (ox + 22, 720, 176, 30));
+            demoPlayButton .setBounds (scaledRect (ox + 206, 720, 60, 30));
+            demoStopButton .setBounds (scaledRect (ox + 274, 720, 60, 30));
+            measureButton  .setBounds (scaledRect (ox + 342, 720, 150, 30));
         }
 
-        fileLabel .setBounds (scaledRect (22, 762, 556, 22));
-        hintLabel .setBounds (scaledRect (22, 812, 556, 20));
-        audioLabel.setBounds (scaledRect (22, 836, 240, 22));
-        exportButton.setBounds (scaledRect (270, 836, 200, 26));
-        retempoButton.setBounds (scaledRect (478, 836, 100, 26));
+        fileLabel .setBounds (scaledRect (ox + 22, 762, baseW() - 44.0f, 22));
+        hintLabel .setBounds (scaledRect (ox + 22, 812, baseW() - 44.0f, 20));
+        audioLabel.setBounds (scaledRect (ox + 22, 836, 240, 22));
+        exportButton.setBounds (scaledRect (ox + 270, 836, 200, 26));
+        retempoButton.setBounds (scaledRect (ox + 478, 836, 100, 26));
     }
 
     //---- Settings panel -----------------------------------------------------
@@ -1189,6 +1227,32 @@ void LyricSyncEditor::resized()
         colourBox.setBounds (scaledRect (ctrlX, y, ctrlW, 28));  y += rowH;
         advanceBox.setBounds (scaledRect (ctrlX, y, ctrlW, 28)); y += rowH;
         hintToggle.setBounds (scaledRect (ctrlX, y, ctrlW * 0.4f, 28));
+    }
+
+    //---- Tap row editor -----------------------------------------------------
+    if (tapEditIndex >= 0)
+    {
+        if (orientation == Orientation::vertical)
+        {
+            const float ox = vShift();
+            const float cx = ox + 40.0f, cy = 300.0f, cw = baseW() - 80.0f;
+
+            tapTextEditor.setBounds (scaledRect (cx + 20, cy + 50, cw - 40, 30));
+            tapTimeEditor.setBounds (scaledRect (cx + 84, cy + 92, 150, 26));
+            tapRowRestampButton.setBounds (scaledRect (cx + 244, cy + 90, 120, 30));
+            tapRowApplyButton  .setBounds (scaledRect (cx + 20, cy + 140, 150, 30));
+            tapRowCancelButton .setBounds (scaledRect (cx + 180, cy + 140, 150, 30));
+        }
+        else
+        {
+            const float cx = 60.0f, cy = 250.0f, cw = 540.0f;
+
+            tapTextEditor.setBounds (scaledRect (cx + 24, cy + 52, cw - 48, 30));
+            tapTimeEditor.setBounds (scaledRect (cx + 88, cy + 92, 160, 26));
+            tapRowRestampButton.setBounds (scaledRect (cx + 312, cy + 90, 110, 30));
+            tapRowApplyButton  .setBounds (scaledRect (cx + 24, cy + 140, 120, 30));
+            tapRowCancelButton .setBounds (scaledRect (cx + 156, cy + 140, 120, 30));
+        }
     }
 
     //---- About panel --------------------------------------------------------
@@ -1413,7 +1477,7 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
 
     //---- Karaoke stack ------------------------------------------------------
     const float refW = (orientation == Orientation::vertical ? 520.0f : 900.0f);
-    const float widthScale = juce::jlimit (0.80f, 1.30f, area.getWidth() / refW)
+    const float widthScale = juce::jlimit (0.80f, 1.70f, area.getWidth() / refW)
                            * static_cast<float> (fontScale);
 
     const float innerH = area.getHeight() - 78.0f;
@@ -1617,6 +1681,35 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
 //==============================================================================
 void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> area)
 {
+    //---- 行编辑：盖住打轴主界面，只留这张小卡片 --------------------------
+    if (tapEditIndex >= 0)
+    {
+        const bool v = (orientation == Orientation::vertical);
+
+        const juce::Rectangle<float> card = v
+            ? juce::Rectangle<float> (vShift() + 40.0f, 300.0f, baseW() - 80.0f, 200.0f)
+            : juce::Rectangle<float> (60.0f, 250.0f, 540.0f, 190.0f);
+
+        g.setColour (palette.card.withAlpha (0.94f));
+        g.fillRoundedRectangle (card, 16.0f);
+        g.setColour (palette.text.withAlpha (0.16f));
+        g.drawRoundedRectangle (card, 16.0f, 1.2f);
+
+        drawText (g, juce::Rectangle<float> (card.getX() + 24.0f, card.getY() + 12.0f,
+                                             card.getWidth() - 48.0f, 26.0f),
+                  tr (Lang::TextId::tapEditTitle) + "   #"
+                    + juce::String (tapEditIndex + 1),
+                  15.0f, palette.accent, true, -1.0f, {}, 1.0f,
+                  juce::Justification::centredLeft);
+
+        drawText (g, juce::Rectangle<float> (card.getX() + 24.0f, card.getY() + 94.0f,
+                                             60.0f, 24.0f),
+                  tr (Lang::TextId::tapRowTime), 10.5f, palette.faint, false, -1.0f, {}, 1.0f,
+                  juce::Justification::centredLeft);
+
+        return;
+    }
+
     const int total = static_cast<int> (tapLines.size());
     const int idx   = juce::jlimit (0, juce::jmax (0, total - 1), tapIndex);
     const bool v    = (orientation == Orientation::vertical);
@@ -1636,7 +1729,7 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
                 juce::Justification::centredRight);
 
     const float refW = (v ? 520.0f : 900.0f);
-    const float widthScale = juce::jlimit (0.80f, 1.30f, area.getWidth() / refW)
+    const float widthScale = juce::jlimit (0.80f, 1.70f, area.getWidth() / refW)
                            * static_cast<float> (fontScale);
 
     const auto rows = tapListRows (area);
@@ -1750,7 +1843,8 @@ void LyricSyncEditor::paintInfoLine (juce::Graphics& g)
     // 右下角只显示加粗的测速结果；时间码在右上角已经有了，
     // 这里右侧的位置留给「重新测速」按钮。
     const bool v = (orientation == Orientation::vertical);
-    const auto area = v ? juce::Rectangle<float> (22.0f, 786.0f, 556.0f, 22.0f)
+    const auto area = v ? juce::Rectangle<float> (vShift() + 22.0f, 786.0f,
+                                                  baseW() - 44.0f, 22.0f)
                         : juce::Rectangle<float> (452.0f, 518.0f, 380.0f, 22.0f);
 
     const juce::String bpmText = tr (Lang::TextId::bpmPrefix)
@@ -1980,6 +2074,15 @@ void LyricSyncEditor::timerCallback()
         smoothedSung = -1.0f;
     }
 
+    if (tapMode)
+    {
+        const auto want = tr (processor.isPlaying.load() ? Lang::TextId::tapHostPause
+                                                         : Lang::TextId::tapHostPlay);
+
+        if (tapHostTransportButton.getButtonText() != want)
+            tapHostTransportButton.setButtonText (want);
+    }
+
     // 左下角提示每 6 秒换一条
     if (showHints && now - hintRotateMs > 6000.0)
     {
@@ -2153,6 +2256,10 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
     if (button == &tapNudgeBackButton)  { nudgeTap (-10); return; }
     if (button == &tapNudgeFwdButton)   { nudgeTap (10); return; }
     if (button == &tapPauseButton)      { toggleTapPause(); return; }
+    if (button == &tapHostTransportButton) { toggleHostTransport(); return; }
+    if (button == &tapRowRestampButton) { restampTapRow(); return; }
+    if (button == &tapRowApplyButton)   { applyTapRow(); return; }
+    if (button == &tapRowCancelButton)  { closeTapRowEditing(); return; }
     if (button == &tapFinishButton)     { finishTapMode(); return; }
     if (button == &tapExitButton)       { exitTapMode(); return; }
 
@@ -2282,9 +2389,12 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 
     if (tapMode)
     {
+        if (tapEditIndex >= 0)
+            return;                       // 正在编辑某一行，画布点击不记录
+
         grabKeyboardFocus();
 
-        // 点「已记录」里的某一行：从那一句重打（该句及之后的时间清掉）
+        // 点「已记录」里的某一行：打开这一行的编辑器
         const auto rows = tapListRows (stageArea());
         const int  first = tapIndex - static_cast<int> (rows.size());
         const auto p = toLogical (e.position);
@@ -2293,7 +2403,7 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
         {
             if (rows[(size_t) i].contains (p))
             {
-                restartTapLine (first + i);
+                editTapRow (first + i);
                 return;
             }
         }
@@ -2836,6 +2946,7 @@ void LyricSyncEditor::enterTapMode()
     tapLines = std::move (plain);
     tapTimes.assign (tapLines.size(), -1.0);
     tapIndex = 0;
+    tapEditIndex = -1;
     tapMode = true;
     editing = false;
     editorBox.setVisible (false);
@@ -2925,6 +3036,186 @@ void LyricSyncEditor::restartTapLine (int index)
     repaint();
 }
 
+
+//==============================================================================
+double LyricSyncEditor::parseTimecode (const juce::String& text) const
+{
+    auto s = text.trim().replaceCharacter (',', '.');
+
+    if (s.isEmpty())
+        return -1.0;
+
+    for (auto c : s)
+        if (! juce::CharacterFunctions::isDigit (c) && c != ':' && c != '.')
+            return -1.0;
+
+    const int colon = s.indexOfChar (':');
+
+    if (colon >= 0)
+    {
+        const int    mins = s.substring (0, colon).getIntValue();
+        const auto secs = s.substring (colon + 1);
+
+        if (! secs.containsOnly ("0123456789."))
+            return -1.0;
+
+        const double v = secs.getDoubleValue();
+
+        if (mins < 0 || v < 0.0)
+            return -1.0;
+
+        return static_cast<double> (mins) * 60.0 + v;
+    }
+
+    return juce::jmax (0.0, s.getDoubleValue());
+}
+
+void LyricSyncEditor::editTapRow (int index)
+{
+    if (! tapMode || tapLines.empty())
+        return;
+
+    index = juce::jlimit (0, static_cast<int> (tapLines.size()) - 1, index);
+
+    tapEditIndex = index;
+
+    tapTextEditor.setText (tapLines[(size_t) index], false);
+    tapTimeEditor.setText (tapTimes[(size_t) index] >= 0.0
+                             ? formatTimecode (tapTimes[(size_t) index])
+                             : juce::String(), false);
+
+    // 手动预览下把播放头停在这一句，方便边听边改
+    if (demoMode && tapTimes[(size_t) index] >= 0.0)
+    {
+        const auto range = audioRange();
+        demoTime = juce::jlimit (range.getStart(), range.getEnd(), tapTimes[(size_t) index]);
+        demoPlaying = false;
+    }
+
+    lastWarning = {};
+
+    updateVisibility();
+    resized();
+    repaint();
+}
+
+void LyricSyncEditor::applyTapRow()
+{
+    if (! tapMode || tapEditIndex < 0 || tapEditIndex >= static_cast<int> (tapLines.size()))
+    {
+        closeTapRowEditing();
+        return;
+    }
+
+    const int i = tapEditIndex;
+    const double t = parseTimecode (tapTimeEditor.getText());
+
+    if (t < 0.0)
+    {
+        lastWarning = tr (Lang::TextId::tapBadTime);
+        repaint();
+        return;
+    }
+
+    if (i > 0 && tapTimes[(size_t) (i - 1)] >= 0.0 && t <= tapTimes[(size_t) (i - 1)] + 0.02)
+    {
+        lastWarning = tr (Lang::TextId::tapTimeOrder);
+        repaint();
+        return;
+    }
+
+    if (i + 1 < static_cast<int> (tapLines.size())
+        && tapTimes[(size_t) (i + 1)] >= 0.0
+        && t >= tapTimes[(size_t) (i + 1)] - 0.02)
+    {
+        lastWarning = tr (Lang::TextId::tapTimeOrder);
+        repaint();
+        return;
+    }
+
+    const auto newText = tapTextEditor.getText().trim();
+
+    if (newText.isNotEmpty())
+        tapLines[(size_t) i] = newText;
+
+    tapTimes[(size_t) i] = t;
+
+    // 指针跳到下一个"还没打"的句子，已记录的不会被覆盖
+    int next = i + 1;
+
+    while (next < static_cast<int> (tapLines.size()) && tapTimes[(size_t) next] >= 0.0)
+        ++next;
+
+    tapIndex = next;
+    lastWarning = {};
+
+    closeTapRowEditing();
+}
+
+void LyricSyncEditor::restampTapRow()
+{
+    if (tapEditIndex < 0)
+        return;
+
+    double t = demoMode ? demoTime : displayTime;
+
+    if (! std::isfinite (t) || t < 0.0)
+        t = 0.0;
+
+    tapTimeEditor.setText (formatTimecode (t), false);
+    tapTimeEditor.grabKeyboardFocus();
+}
+
+void LyricSyncEditor::closeTapRowEditing()
+{
+    tapEditIndex = -1;
+    tapTextEditor.setText ({}, false);
+    tapTimeEditor.setText ({}, false);
+
+    updateVisibility();
+    resized();
+    repaint();
+}
+
+void LyricSyncEditor::toggleHostTransport()
+{
+    if (! tapMode)
+        return;
+
+    // 手动预览模式下，插件自己就能走带
+    if (demoMode)
+    {
+        toggleTapPause();
+        return;
+    }
+
+   #if JUCE_WINDOWS
+    if (auto* peer = getPeer())
+    {
+        auto* hwnd = static_cast<HWND> (peer->getNativeHandle());
+
+        if (hwnd != nullptr)
+        {
+            // 找到宿主主窗口（插件的顶层窗口），给它发一次空格
+            HWND target = GetAncestor (hwnd, GA_ROOTOWNER);
+
+            if (target == nullptr)
+                target = GetAncestor (hwnd, GA_ROOT);
+
+            if (target != nullptr)
+            {
+                PostMessage (target, WM_KEYDOWN, VK_SPACE, 0x00390001);
+                PostMessage (target, WM_KEYUP,   VK_SPACE, 0xC0390001);
+                lastWarning = tr (Lang::TextId::tapHostKeyHint);
+            }
+        }
+    }
+   #endif
+
+    repaint();
+}
+
+//==============================================================================
 void LyricSyncEditor::nudgeTap (int deltaMs)
 {
     if (! tapMode || tapIndex <= 0)
@@ -3023,6 +3314,7 @@ void LyricSyncEditor::finishTapMode()
     tapLines.clear();
     tapTimes.clear();
     tapIndex = 0;
+    tapEditIndex = -1;
     demoPlaying = false;
 
     // 不走 loadLyricsText()：它会把 offset 归零，而打轴时间已含当前 offset。
@@ -3049,6 +3341,7 @@ void LyricSyncEditor::exitTapMode()
     tapLines.clear();
     tapTimes.clear();
     tapIndex = 0;
+    tapEditIndex = -1;
     demoPlaying = false;
 
     updateVisibility();

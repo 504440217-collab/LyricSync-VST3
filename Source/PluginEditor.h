@@ -101,8 +101,19 @@ private:
 
     float baseW() const
     {
-        return zenMode ? 960.0f
-                       : (orientation == Orientation::vertical ? vBaseW : hBaseW);
+        if (zenMode)
+            return 960.0f;
+
+        if (orientation != Orientation::vertical)
+            return hBaseW;
+
+        // 竖版：窗口被拉宽时画布跟着变宽（歌词卡片变宽），高度基准不变。
+        // 以前固定 600 宽，窗口一宽就缩成中间一条窄卡，字也变小。
+        const float w = juce::jmax (1.0f, static_cast<float> (getWidth()));
+        const float h = juce::jmax (1.0f, static_cast<float> (getHeight()));
+        const float fromAspect = vBaseH * (w / h);
+
+        return juce::jlimit (vBaseW, vBaseW * 2.6f, fromAspect);
     }
 
     /** 纯享模式下画布比例跟窗口一致，缩放才会均匀、铺满不留黑边。 */
@@ -116,6 +127,12 @@ private:
         }
 
         return orientation == Orientation::vertical ? vBaseH : hBaseH;
+    }
+
+    /** 竖版画布加宽后，原本按 600 宽排的控件需要整体右移居中。 */
+    float vShift() const
+    {
+        return orientation == Orientation::vertical ? (baseW() - vBaseW) * 0.5f : 0.0f;
     }
 
     void timerCallback() override;
@@ -161,6 +178,12 @@ private:
     void restartTapLine (int index);      // 从这里重打：清掉该句及之后的时间
     void nudgeTap (int deltaMs);          // 微调刚打好的那一句
     void toggleTapPause();                // 手动预览下暂停/继续
+    void toggleHostTransport();            // 给宿主发空格，开始/暂停播放
+    void editTapRow (int index);           // 打开某一行的编辑
+    void applyTapRow();                    // 保存这一行的文字与时间
+    void restampTapRow();                  // 把这一行的时间改成当前播放位置
+    void closeTapRowEditing();             // 取消编辑
+    double parseTimecode (const juce::String& text) const;
     std::vector<juce::Rectangle<float>> tapListRows (juce::Rectangle<float> area) const;
     void finishTapMode();
     void exitTapMode();
@@ -266,6 +289,7 @@ private:
     std::vector<juce::String> tapLines;
     std::vector<double>       tapTimes;
     int  tapIndex = 0;
+    int  tapEditIndex = -1;               // >=0 表示正在编辑某一行
 
     //---- Audio length -------------------------------------------------------
     double lastAudioSaveMs = 0.0;
@@ -307,6 +331,11 @@ private:
     juce::TextButton  tapNudgeBackButton;
     juce::TextButton  tapNudgeFwdButton;
     juce::TextButton  tapPauseButton;
+    juce::TextButton  tapHostTransportButton;   // 同步宿主播放/暂停
+    juce::TextButton  tapRowRestampButton;
+    juce::TextButton  tapRowApplyButton;
+    juce::TextButton  tapRowCancelButton;
+    juce::TextEditor  tapTextEditor, tapTimeEditor;
     juce::TextButton  tapFinishButton;
     juce::TextButton  tapExitButton;
     juce::TextButton  measureButton;
