@@ -188,6 +188,7 @@ private:
     std::vector<int> tapListIndices() const;      // 已记录行的行号（与 tapListRows 一一对应）
     juce::Rectangle<float> tapListTrack (juce::Rectangle<float> area) const;  // 列表右侧滚动条
     void scrollTapList (int deltaRows);
+    void syncTapToPlayhead (double t);   // 宿主跳转时间后，把打轴指针挪到对应那一句
     void showEditorMenu (juce::TextEditor& te, juce::Point<int> screenPos);   // 右键菜单（跟随中英文）
     void finishTapMode();
     void exitTapMode();
@@ -295,6 +296,7 @@ private:
     int  tapIndex = 0;
     int  tapEditIndex = -1;               // >=0 表示正在编辑某一行
     int  tapListScroll = 0;               // 列表往回翻了几行（0 = 停在最新）
+    double tapFollowTime = -1.0;          // 上一帧的播放位置，用来识别"跳转"
 
     //---- Audio length -------------------------------------------------------
     double lastAudioSaveMs = 0.0;

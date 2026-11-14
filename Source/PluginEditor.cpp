@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.7.5";
+    const char* const kVersion = "1.7.6";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -2110,11 +2110,23 @@ void LyricSyncEditor::timerCallback()
 
     if (tapMode)
     {
+        // 宿主里点时间轴 / 拖播放头时，displayTime 会突然跳一大截，
+        // 而打轴指针只在打点时才动 —— 于是歌词停在上一次打点的位置。
+        // 这里把"与正常推进量差得太多"判为跳转，跟着把指针挪到对应那一句。
+        if (tapFollowTime >= 0.0 && std::abs ((displayTime - tapFollowTime) - dt) > 0.60)
+            syncTapToPlayhead (displayTime);
+
+        tapFollowTime = displayTime;
+
         const auto want = tr (processor.isPlaying.load() ? Lang::TextId::tapHostPause
                                                          : Lang::TextId::tapHostPlay);
 
         if (tapHostTransportButton.getButtonText() != want)
             tapHostTransportButton.setButtonText (want);
+    }
+    else
+    {
+        tapFollowTime = -1.0;
     }
 
     // 左下角提示每 6 秒换一条
@@ -3070,6 +3082,7 @@ void LyricSyncEditor::enterTapMode()
     tapTimes = std::move (times);
     tapEditIndex = -1;
     tapListScroll = 0;
+    tapFollowTime = demoMode ? demoTime : displayTime;
 
     // 已经打过轴的行保留时间，指针停到第一个还没打点的句子
     {
@@ -3510,6 +3523,27 @@ juce::Rectangle<float> LyricSyncEditor::tapListTrack (juce::Rectangle<float> are
 
     return v ? juce::Rectangle<float> (area.getRight() - 30.0f, top, 6.0f, h)
              : juce::Rectangle<float> (area.getRight() - 26.0f, top, 6.0f, h);
+}
+
+void LyricSyncEditor::syncTapToPlayhead (double t)
+{
+    if (! tapMode || tapLines.empty())
+        return;
+
+    // 找到播放头所在的句子：最后一个"已打点且时间不晚于 t"的行
+    int target = 0;
+
+    for (int i = 0; i < static_cast<int> (tapTimes.size()); ++i)
+        if (tapTimes[(size_t) i] >= 0.0 && tapTimes[(size_t) i] <= t + 0.001)
+            target = i;
+
+    if (target != tapIndex)
+    {
+        tapIndex = target;
+        tapListScroll = 0;
+        lastWarning = {};
+        repaint();
+    }
 }
 
 void LyricSyncEditor::scrollTapList (int deltaRows)
