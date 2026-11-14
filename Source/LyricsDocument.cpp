@@ -506,3 +506,37 @@ int LyricsDocument::sungCharsAt (const LyricLine& l, double t) const noexcept
 
     return juce::jlimit (0, l.text.length(), count);
 }
+
+double LyricsDocument::sungProgressAt (const LyricLine& l, double t) const noexcept
+{
+    if (l.charOffsets.empty() || l.text.isEmpty())
+        return -1.0;
+
+    const double rel = t - l.time;
+    const int n = static_cast<int> (l.charOffsets.size());
+
+    int count = 0;
+
+    for (auto off : l.charOffsets)
+    {
+        if (rel >= off)
+            ++count;
+        else
+            break;
+    }
+
+    if (count <= 0)
+        return rel < 0.0 ? -1.0 : 0.0;
+
+    const int idx = count - 1;                       // 正在唱的那个字
+    const double start = l.charOffsets[static_cast<size_t> (idx)];
+    // 最后一个字没有"下一个起点"，用 0.4 s 兜底（大多数歌曲单字在 0.2–0.5 s）
+    const double end = (idx + 1 < n) ? l.charOffsets[static_cast<size_t> (idx + 1)]
+                                     : start + 0.4;
+
+    const double span = juce::jmax (0.02, end - start);
+    const double frac = juce::jlimit (0.0, 1.0, (rel - start) / span);
+
+    return static_cast<double> (idx) + frac;
+}
+

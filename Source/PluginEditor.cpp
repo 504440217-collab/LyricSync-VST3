@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.6.1";
+    const char* const kVersion = "1.6.2";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -1444,20 +1444,39 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
 
             if (isCurrent)
             {
-                // 逐字模式：没有逐字时间戳的普通 LRC，也按整行时长均匀地把高亮扫过去。
-                int sung = -1;
+                // 逐句模式：整行一起亮；逐字模式：连续扫光（0..N 的浮点数）
+                float sung = -1.0f;
 
-                if (line.hasKaraoke())
+                if (advanceMode == 1)
                 {
-                    sung = doc.sungCharsAt (line, displayTime);
+                    if (line.hasKaraoke())
+                    {
+                        sung = static_cast<float> (doc.sungProgressAt (line, displayTime));
+                    }
+                    else if (line.text.isNotEmpty())
+                    {
+                        const double s0 = line.time;
+                        const double s1 = doc.lineEnd (i);
+                        const double p = juce::jlimit (0.0, 1.0,
+                                                       (displayTime - s0) / juce::jmax (0.05, s1 - s0));
+                        sung = static_cast<float> (p * static_cast<double> (line.text.length()));
+                    }
                 }
-                else if (advanceMode == 1 && line.text.isNotEmpty())
+
+                // 时间码是按音频块来的（约 20 ms 一跳），再叠一层轻度平滑，
+                // 视觉上就是"一路扫过去"而不是一格一格爬。
+                if (sung >= 0.0f)
                 {
-                    const double s0 = line.time;
-                    const double s1 = doc.lineEnd (i);
-                    const double p = juce::jlimit (0.0, 1.0,
-                                                   (displayTime - s0) / juce::jmax (0.05, s1 - s0));
-                    sung = static_cast<int> (std::round (p * static_cast<double> (line.text.length())));
+                    if (smoothedSung < 0.0f || std::abs (sung - smoothedSung) > 2.5f)
+                        smoothedSung = sung;               // 跳转/回退：直接吸附
+                    else
+                        smoothedSung += (sung - smoothedSung) * 0.55f;
+
+                    sung = smoothedSung;
+                }
+                else
+                {
+                    smoothedSung = -1.0f;
                 }
 
                 const float fade   = 0.55f + 0.45f * transition;
@@ -1486,7 +1505,7 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
                                                            juce::jlimit (0.0f, 1.0f, transition));
 
                 drawText (g, lineRect, line.text, size, colour,
-                          ad < 1.5f, -1, {}, alpha);
+                          ad < 1.5f, -1.0f, {}, alpha);
             }
         }
     }
@@ -1750,7 +1769,7 @@ void LyricSyncEditor::paintAbout (juce::Graphics& g, juce::Rectangle<float> pane
 void LyricSyncEditor::drawText (juce::Graphics& g, juce::Rectangle<float> area,
                                 const juce::String& text, float size,
                                 juce::Colour colour, bool bold,
-                                int sungChars, juce::Colour sungColour, float alpha,
+                                float sungProgress, juce::Colour sungColour, float alpha,
                                 juce::Justification just)
 {
     if (text.isEmpty() || area.isEmpty())
@@ -1792,9 +1811,22 @@ void LyricSyncEditor::drawText (juce::Graphics& g, juce::Rectangle<float> area,
 
     s.setColour (colour.withAlpha (alpha));
 
-    if (sungChars > 0)
-        s.setColour (juce::Range<int> (0, juce::jmin (sungChars, text.length())),
-                     sungColour.withAlpha (alpha));
+    if (sungProgress > 0.0f)
+    {
+        const int total = text.length();
+        const int full  = juce::jlimit (0, total, static_cast<int> (std::floor (sungProgress)));
+        const float frac = juce::jlimit (0.0f, 1.0f, sungProgress - static_cast<float> (full));
+
+        if (full > 0)
+            s.setColour (juce::Range<int> (0, full), sungColour.withAlpha (alpha));
+
+        // 正在唱的这个字：底色 → 高亮色按字内进度混合，扫光就是连续的
+        if (full < total && frac > 0.001f)
+        {
+            const auto blend = colour.interpolatedWith (sungColour, frac);
+            s.setColour (juce::Range<int> (full, full + 1), blend.withAlpha (alpha));
+        }
+    }
 
     const juce::Graphics::ScopedSaveState state (g);
     s.draw (g, area);
@@ -1854,6 +1886,7 @@ void LyricSyncEditor::timerCallback()
         previousIndex = currentIndex;      // 用来做"上一句淡出"的颜色过渡
         currentIndex = idx;
         transition = 0.0f;
+        smoothedSung = -1.0f;
     }
 
     // 左下角提示每 6 秒换一条

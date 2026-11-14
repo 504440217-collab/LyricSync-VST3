@@ -213,6 +213,7 @@ private:
     Orientation orientation = Orientation::horizontal;
     int zoomPercent = 100;           // 50 / 75 / 100 / 125 / 150 / 200
 
+    float smoothedSung = -1.0f;         // 逐字扫光的平滑值（避免时间码分块造成的微跳）
     float uiScale  = 1.0f;
     float uiScaleX = 1.0f;          // 允许横向/纵向独立伸缩
     float uiScaleY = 1.0f;

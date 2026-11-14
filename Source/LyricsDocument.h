@@ -64,6 +64,13 @@ public:
     /** 返回 t 时刻已唱过的字数（0..text.length()）；无逐字信息时返回 -1。 */
     int sungCharsAt (const LyricLine& l, double t) const noexcept;
 
+    /**
+     *  连续版的"唱到第几个字"：返回值可以是 3.42，表示前 3 个字已唱完、
+     *  第 4 个字唱了 42%。界面用它做字内渐变，避免整字硬跳。
+     *  没有逐字时间戳时返回 -1。
+     */
+    double sungProgressAt (const LyricLine& l, double t) const noexcept;
+
     const LyricsInfo& info() const noexcept   { return lastInfo; }
 
 private:
