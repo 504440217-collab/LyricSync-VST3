@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.5.3";
+    const char* const kVersion = "1.5.4";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     const char* const kFontNames[] =
@@ -169,7 +169,7 @@ namespace
         auto p = path.toLowerCase();
         return p.endsWith (".lrc") || p.endsWith (".krc") || p.endsWith (".txt")
             || p.endsWith (".srt") || p.endsWith (".vtt") || p.endsWith (".ass")
-            || p.endsWith (".ssa");
+            || p.endsWith (".ssa") || p.endsWith (".doc") || p.endsWith (".docx");
     }
 
     bool looksLikeImageFile (const juce::String& path)
@@ -203,6 +203,25 @@ namespace
         }
 
         return out.trim();
+    }
+
+    bool isCjkChar (juce_wchar c)
+    {
+        return (c >= 0x2e80 && c <= 0x9fff)
+            || (c >= 0xf900 && c <= 0xfaff)
+            || (c >= 0xff00 && c <= 0xffef)
+            || (c >= 0x3000 && c <= 0x303f);
+    }
+
+    /** Segoe UI / Arial 没有汉字字形，需要给中文单独指定字体。 */
+    bool typefaceNeedsCjkFallback (int index) { return index >= 6; }
+
+    /** 自定义皮肤图片的存档目录（复制一份，避免原图被移动后失效）。 */
+    juce::File skinsDir()
+    {
+        return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                 .getChildFile ("LyricSync")
+                 .getChildFile ("Skins");
     }
 
     /** 歌词库目录：文档/LyricSync/Lyrics */
@@ -348,7 +367,8 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
                      &applyTextButton, &cancelTextButton,
                      &tapStartButton, &tapUndoButton, &tapFinishButton, &tapExitButton,
                      &measureButton, &exportButton, &demoClockToggle,
-                     &orientHButton, &orientVButton, &pickImageButton, &clearImageButton })
+                     &orientHButton, &orientVButton, &pickImageButton, &clearImageButton,
+                     &hintToggle })
     {
         b->addListener (this);
         addAndMakeVisible (*b);
@@ -361,6 +381,7 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     }
 
     demoClockToggle.setClickingTogglesState (true);
+    hintToggle.setClickingTogglesState (true);
 
     for (auto* box : { &languageBox, &zoomBox, &skinBox, &fontBox, &colourBox, &advanceBox })
     {
@@ -385,7 +406,6 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
 
     addLabel (offsetLabel, 12.0f, true,  juce::Justification::centred);
     addLabel (fileLabel,   11.5f, false, juce::Justification::centredLeft);
-    addLabel (metaLabel,   11.5f, false, juce::Justification::centredRight);
     addLabel (hintLabel,   11.0f, false, juce::Justification::centredLeft);
     addLabel (fontLabel,   11.0f, false, juce::Justification::centredLeft);
     addLabel (audioLabel,  11.5f, false, juce::Justification::centredRight);
@@ -414,6 +434,7 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     refreshLookAndFeel();
     updateVisibility();
     startTimerHz (30);
+    hintRotateMs = juce::Time::getMillisecondCounterHiRes();
 
     tooltipWindow = std::make_unique<juce::TooltipWindow> (this, 550);
 }
@@ -451,6 +472,13 @@ void LyricSyncEditor::loadUiPrefs()
         else if (key == "skin")        skinIndex   = value.getIntValue();
         else if (key == "font")        fontIndex   = value.getIntValue();
         else if (key == "colour")      colourIndex = value.getIntValue();
+        else if (key == "bg" && value.isNotEmpty())
+        {
+            const juce::File bgFile (value);
+
+            if (bgFile.existsAsFile())
+                customBg = juce::ImageFileFormat::loadFrom (bgFile);
+        }
     }
 
     skinIndex   = juce::jlimit (0, UiPalette::numSkins() - 1, skinIndex);
@@ -469,6 +497,7 @@ void LyricSyncEditor::saveUiPrefs()
     lines.add ("skin=" + juce::String (skinIndex));
     lines.add ("font=" + juce::String (fontIndex));
     lines.add ("colour=" + juce::String (colourIndex));
+    lines.add ("bg=" + processor.getSetting (Settings::customBg, "").toString());
 
     f.replaceWithText (lines.joinIntoString ("\n"));
 }
@@ -476,8 +505,15 @@ void LyricSyncEditor::saveUiPrefs()
 //==============================================================================
 juce::Font LyricSyncEditor::uiFont (float size, bool bold) const
 {
-    return juce::Font (juce::String (kFontNames[juce::jlimit (0, kNumFonts - 1, fontIndex)]),
-                       size, bold ? juce::Font::bold : juce::Font::plain);
+    const int idx = juce::jlimit (0, kNumFonts - 1, fontIndex);
+
+    // 界面文字（按钮/标签）几乎都是中文：选到纯拉丁字体时退回微软雅黑，
+    // 否则整片中文都会变成空白。
+    const juce::String name = typefaceNeedsCjkFallback (idx)
+                                ? juce::String ("Microsoft YaHei UI")
+                                : juce::String (kFontNames[idx]);
+
+    return juce::Font (name, size, bold ? juce::Font::bold : juce::Font::plain);
 }
 
 juce::Colour LyricSyncEditor::lyricColour() const
@@ -518,6 +554,9 @@ void LyricSyncEditor::syncControlsFromSettings()
     const int adv = static_cast<int> (processor.getSetting (Settings::advance, -1));
     if (adv >= 0)
         advanceMode = juce::jlimit (0, 1, adv);
+
+    const int hints = static_cast<int> (processor.getSetting (Settings::showHints, 1));
+    showHints = hints != 0;
 
     const auto bgPath = processor.getSetting (Settings::customBg, "").toString();
     if (bgPath.isNotEmpty() && juce::File (bgPath).existsAsFile())
@@ -570,7 +609,10 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     clearImageButton.setButtonText (tr (Lang::TextId::clearImage));
 
     fontLabel.setText (tr (Lang::TextId::fontSize), juce::dontSendNotification);
-    hintLabel.setText (tr (Lang::TextId::hint), juce::dontSendNotification);
+    hintToggle.setText (showHints ? tr (Lang::TextId::onLabel) : tr (Lang::TextId::offLabel),
+                        juce::dontSendNotification);
+    hintToggle.setToggleState (showHints, juce::dontSendNotification);
+    updateHint (true);
 
     //---- Combo contents -----------------------------------------------------
     updatingCombos = true;
@@ -651,6 +693,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     pickImageButton .setTooltip (tr (Lang::TextId::tipPickImage));
     clearImageButton.setTooltip (tr (Lang::TextId::tipClearImage));
     closeSettingsButton.setTooltip (tr (Lang::TextId::tipClose));
+    hintToggle      .setTooltip (tr (Lang::TextId::showHints));
 
     if (reloadDemoLyrics && usingDemoLyrics)
     {
@@ -701,7 +744,6 @@ void LyricSyncEditor::refreshLookAndFeel()
     offsetLabel.setColour (juce::Label::backgroundColourId, palette.card);
     hintLabel.setColour (juce::Label::textColourId, palette.faint);
     fileLabel.setColour (juce::Label::textColourId, palette.dim);
-    metaLabel.setColour (juce::Label::textColourId, palette.faint);
     fontLabel.setColour (juce::Label::textColourId, palette.faint);
     audioLabel.setColour (juce::Label::textColourId, palette.dim);
 
@@ -775,7 +817,8 @@ void LyricSyncEditor::updateVisibility()
                      static_cast<juce::Component*> (&orientVButton),
                      static_cast<juce::Component*> (&pickImageButton),
                      static_cast<juce::Component*> (&clearImageButton),
-                     static_cast<juce::Component*> (&closeSettingsButton) })
+                     static_cast<juce::Component*> (&closeSettingsButton),
+                     static_cast<juce::Component*> (&hintToggle) })
         c->setVisible (settingsOpen);
 
     closeAboutButton.setVisible (aboutOpen);
@@ -808,7 +851,7 @@ juce::Rectangle<float> LyricSyncEditor::stageArea() const
 juce::Rectangle<float> LyricSyncEditor::settingsPanelArea() const
 {
     if (orientation == Orientation::vertical)
-        return { 40.0f, 170.0f, 520.0f, 500.0f };
+        return { 40.0f, 150.0f, 520.0f, 540.0f };
 
     return { 200.0f, 66.0f, 560.0f, 470.0f };
 }
@@ -825,7 +868,6 @@ void LyricSyncEditor::updateScaledFonts()
 {
     offsetLabel.setFont (uiFont (12.0f  * uiScale, true));
     fileLabel  .setFont (uiFont (11.5f * uiScale));
-    metaLabel  .setFont (uiFont (11.5f * uiScale));
     hintLabel  .setFont (uiFont (11.0f  * uiScale));
     fontLabel  .setFont (uiFont (11.0f  * uiScale));
     audioLabel .setFont (uiFont (11.5f * uiScale));
@@ -926,7 +968,6 @@ void LyricSyncEditor::resized()
         }
 
         fileLabel .setBounds (scaledRect (22, 518, 420, 22));
-        metaLabel .setBounds (scaledRect (452, 518, 296, 22));
         hintLabel .setBounds (scaledRect (22, 542, 540, 20));
         audioLabel.setBounds (scaledRect (566, 541, 110, 22));
     }
@@ -969,7 +1010,6 @@ void LyricSyncEditor::resized()
         }
 
         fileLabel .setBounds (scaledRect (22, 762, 556, 22));
-        metaLabel .setBounds (scaledRect (22, 786, 556, 22));
         hintLabel .setBounds (scaledRect (22, 812, 556, 20));
         audioLabel.setBounds (scaledRect (22, 836, 240, 22));
         exportButton.setBounds (scaledRect (270, 836, 200, 26));
@@ -1004,7 +1044,8 @@ void LyricSyncEditor::resized()
 
         fontBox  .setBounds (scaledRect (ctrlX, y, ctrlW, 28));  y += rowH;
         colourBox.setBounds (scaledRect (ctrlX, y, ctrlW, 28));  y += rowH;
-        advanceBox.setBounds (scaledRect (ctrlX, y, ctrlW, 28));
+        advanceBox.setBounds (scaledRect (ctrlX, y, ctrlW, 28)); y += rowH;
+        hintToggle.setBounds (scaledRect (ctrlX, y, ctrlW * 0.4f, 28));
     }
 
     //---- About panel --------------------------------------------------------
@@ -1076,6 +1117,8 @@ void LyricSyncEditor::paint (juce::Graphics& g)
         drawText (g, juce::Rectangle<float> (0.0f, baseH() - 34.0f, baseW(), 20.0f),
                   tr (Lang::TextId::zenExit), 11.0f,
                   palette.faint.withAlpha (0.45f), false);
+    else
+        paintInfoLine (g);
 
     if (settingsOpen)
         paintSettings (g, settingsPanelArea());
@@ -1433,6 +1476,32 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
 }
 
 //==============================================================================
+void LyricSyncEditor::paintInfoLine (juce::Graphics& g)
+{
+    // 右下角只留两样东西：测速 BPM（加粗）+ 当前时间码
+    const bool v = (orientation == Orientation::vertical);
+    const auto area = v ? juce::Rectangle<float> (22.0f, 786.0f, 556.0f, 22.0f)
+                        : juce::Rectangle<float> (452.0f, 518.0f, 486.0f, 22.0f);
+
+    const juce::String bpmText = detectedBpm > 0.0
+        ? tr (Lang::TextId::bpmPrefix) + juce::String (detectedBpm, 1)
+        : tr (Lang::TextId::bpmPrefix) + juce::String ("--");
+    const juce::String timeText = timecodeText (displayTime);
+
+    juce::AttributedString s;
+    s.setJustification (juce::Justification::centredRight);
+    s.append (bpmText, uiFont (14.0f, true));
+    s.append ("    ", uiFont (14.0f, true));
+    s.append (timeText, uiFont (12.5f, false));
+
+    s.setColour (juce::Range<int> (0, bpmText.length()), palette.accent);
+    s.setColour (juce::Range<int> (bpmText.length(),
+                                   bpmText.length() + 4 + timeText.length()), palette.dim);
+
+    const juce::Graphics::ScopedSaveState state (g);
+    s.draw (g, area);
+}
+
 void LyricSyncEditor::paintSettings (juce::Graphics& g, juce::Rectangle<float> panel)
 {
     g.setColour (juce::Colours::black.withAlpha (0.55f));
@@ -1469,7 +1538,8 @@ void LyricSyncEditor::paintSettings (juce::Graphics& g, juce::Rectangle<float> p
         Lang::TextId::setBackground,
         Lang::TextId::setFont,
         Lang::TextId::setColor,
-        Lang::TextId::setAdvance
+        Lang::TextId::setAdvance,
+        Lang::TextId::showHints
     };
 
     for (auto id : labels)
@@ -1532,10 +1602,39 @@ void LyricSyncEditor::drawText (juce::Graphics& g, juce::Rectangle<float> area,
         return;
 
     juce::AttributedString s;
-    s.setText (text);
-    s.setFont (uiFont (size, bold));
     s.setJustification (just);
     s.setWordWrap (juce::AttributedString::byChar);
+
+    const int idx = juce::jlimit (0, kNumFonts - 1, fontIndex);
+    const int style = bold ? juce::Font::bold : juce::Font::plain;
+
+    if (! typefaceNeedsCjkFallback (idx))
+    {
+        s.append (text, juce::Font (juce::String (kFontNames[idx]), size, style));
+    }
+    else
+    {
+        // 拉丁字体 + 雅黑混排：拉丁字符用所选字体，汉字交给雅黑
+        const juce::Font latin (juce::String (kFontNames[idx]), size, style);
+        const juce::Font cjk ("Microsoft YaHei UI", size, style);
+
+        int start = 0;
+        bool curCJK = isCjkChar (text[0]);
+
+        for (int i = 1; i <= text.length(); ++i)
+        {
+            const bool last = (i >= text.length());
+            const bool cjkNow = last ? curCJK : isCjkChar (text[i]);
+
+            if (last || cjkNow != curCJK)
+            {
+                s.append (text.substring (start, i), curCJK ? cjk : latin);
+                start = i;
+                curCJK = cjkNow;
+            }
+        }
+    }
+
     s.setColour (colour.withAlpha (alpha));
 
     if (sungChars > 0)
@@ -1602,6 +1701,14 @@ void LyricSyncEditor::timerCallback()
         transition = 0.0f;
     }
 
+    // 左下角提示每 6 秒换一条
+    if (showHints && now - hintRotateMs > 6000.0)
+    {
+        hintRotateMs = now;
+        ++hintIndex;
+        updateHint (false);
+    }
+
     // 每秒测一次速度（只测不占音频线程）
     if (now - tempoAnalyseMs > 1000.0)
     {
@@ -1649,13 +1756,30 @@ void LyricSyncEditor::timerCallback()
 void LyricSyncEditor::updateLabels (double t)
 {
     offsetLabel.setText (juce::String (offsetMs, 0) + " ms", juce::dontSendNotification);
-    metaLabel  .setText (barBeatText(), juce::dontSendNotification);
     audioLabel .setText (audioRangeText(), juce::dontSendNotification);
 
     auto label = fileDescription;
     if (lastWarning.isNotEmpty())
         label += tr (Lang::TextId::warningPrefix) + lastWarning;
     fileLabel.setText (label, juce::dontSendNotification);
+}
+
+juce::String LyricSyncEditor::hintText() const
+{
+    static const Lang::TextId ids[] =
+    {
+        Lang::TextId::hintA, Lang::TextId::hintB, Lang::TextId::hintC,
+        Lang::TextId::hintD, Lang::TextId::hintE, Lang::TextId::hintF
+    };
+
+    const int n = static_cast<int> (sizeof (ids) / sizeof (ids[0]));
+    return tr (ids[juce::jlimit (0, n - 1, hintIndex % n)]);
+}
+
+void LyricSyncEditor::updateHint (bool force)
+{
+    juce::ignoreUnused (force);
+    hintLabel.setText (showHints ? hintText() : juce::String(), juce::dontSendNotification);
 }
 
 juce::String LyricSyncEditor::timecodeText (double t) const
@@ -1749,6 +1873,19 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
     if (button == &orientVButton)       { setOrientation (Orientation::vertical); return; }
     if (button == &pickImageButton)     { pickBackgroundImage(); return; }
     if (button == &clearImageButton)    { clearBackgroundImage(); return; }
+
+    if (button == &hintToggle)
+    {
+        showHints = hintToggle.getToggleState();
+        hintToggle.setText (showHints ? tr (Lang::TextId::onLabel)
+                                      : tr (Lang::TextId::offLabel),
+                            juce::dontSendNotification);
+        showHints = hintToggle.getToggleState();
+        processor.setSetting (Settings::showHints, showHints);
+        updateHint (true);
+        repaint();
+        return;
+    }
 
     if (button == &demoClockToggle)
     {
@@ -2031,7 +2168,23 @@ void LyricSyncEditor::pickBackgroundImage()
             return;
 
         customBg = img;
-        processor.setSetting (Settings::customBg, file.getFullPathName());
+
+        // 复制一份到应用目录：原图被移动/删除，皮肤也不会丢
+        juce::File stored = file;
+        auto dir = skinsDir();
+
+        if (dir.createDirectory().wasOk() || dir.isDirectory())
+        {
+            auto dest = dir.getChildFile (file.getFileName());
+
+            if (dest != file && (! dest.existsAsFile() || dest.deleteFile()))
+            {
+                if (file.copyFileTo (dest))
+                    stored = dest;
+            }
+        }
+
+        processor.setSetting (Settings::customBg, stored.getFullPathName());
         setSkin (5);
         updateVisibility();
         repaint();
@@ -2067,7 +2220,7 @@ void LyricSyncEditor::openFileDialog()
     chooser = std::make_unique<juce::FileChooser> (
         tr (Lang::TextId::fileChooserTitle),
         juce::File::getSpecialLocation (juce::File::userHomeDirectory),
-        "*.lrc;*.krc;*.txt;*.srt;*.vtt");
+        "*.lrc;*.krc;*.txt;*.srt;*.vtt;*.doc;*.docx");
 
     const int flags = juce::FileBrowserComponent::openMode
                     | juce::FileBrowserComponent::canSelectFiles;
@@ -2087,9 +2240,17 @@ void LyricSyncEditor::loadLyricsFile (const juce::File& file)
 
     juce::String text;
     bool isKrc = false;
+    bool isWord = false;
     double krcTotal = -1.0;
 
-    if (loaded && Krc::isKrcData (data.getData(), static_cast<int> (data.getSize())))
+    const auto ext = file.getFileExtension().toLowerCase();
+
+    if (loaded && (ext == ".doc" || ext == ".docx"))
+    {
+        text = WordDoc::extractText (file, data);
+        isWord = true;
+    }
+    else if (loaded && Krc::isKrcData (data.getData(), static_cast<int> (data.getSize())))
     {
         const auto plain = Krc::decrypt (data);
         text = Krc::toEnhancedLrc (plain);
@@ -2118,7 +2279,8 @@ void LyricSyncEditor::loadLyricsFile (const juce::File& file)
     processor.setSetting (Settings::audioTotal, audioTotalSeconds);
 
     fileDescription = file.getFileName() + sep()
-                    + (isKrc ? tr (Lang::TextId::krcFormat) : info.formatName)
+                    + (isWord ? tr (Lang::TextId::wordFormat)
+                              : (isKrc ? tr (Lang::TextId::krcFormat) : info.formatName))
                     + sep() + juce::String (info.lineCount)
                     + tr (Lang::TextId::lineCountSuffix);
 

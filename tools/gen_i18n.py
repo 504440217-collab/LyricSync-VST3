@@ -203,6 +203,18 @@ TABLE = [
                      "Export the current lyrics as a .lrc file"),
     ("zenExit",      "双击返回", "Double-click to exit"),
     ("bpmPrefix",    "测速 ", "Tempo "),
+    ("wordFormat",   "Word 文档", "Word document"),
+    ("showHints",    "界面提示", "On-screen tips"),
+    ("onLabel",      "开", "On"),
+    ("offLabel",     "关", "Off"),
+
+    #--- 左下角轮播提示 -----------------------------------------------------
+    ("hintA", "双击歌词区 = 纯享全屏，再双击返回", "Double-click the lyrics for full-screen, again to return"),
+    ("hintB", "歌词区按住上下拖动，可以翻看前后歌词", "Drag the lyrics up/down to preview other lines"),
+    ("hintC", "齿轮里可换皮肤 / 字体 / 歌词颜色 / 窗口比例", "The gear holds skin, font, colour and window size"),
+    ("hintD", "支持 LRC / 酷狗 KRC / SRT / TXT / Word 歌词", "LRC / Kugou KRC / SRT / TXT / Word lyrics"),
+    ("hintE", "「导出 LRC」可把当前歌词存成文件", "Export LRC saves the current lyrics to a file"),
+    ("hintF", "前奏结尾会出现 4 拍圆点倒数", "A 4-beat count-in appears before the first line"),
     ("tipPickImage", "上传一张图片作为自定义皮肤背景", "Use your own image as the skin background"),
     ("tipClearImage", "清除自定义背景图片", "Remove the custom background image"),
     ("tipClose",    "关闭设置", "Close settings"),

@@ -2,6 +2,7 @@
 
 #include "PluginProcessor.h"
 #include "KrcLyrics.h"
+#include "WordLyrics.h"
 #include "UiPalette.h"
 #include "I18n.h"
 
@@ -85,8 +86,24 @@ private:
     static constexpr float hBaseW = 960.0f, hBaseH = 600.0f;
     static constexpr float vBaseW = 600.0f, vBaseH = 900.0f;
 
-    float baseW() const { return orientation == Orientation::vertical ? vBaseW : hBaseW; }
-    float baseH() const { return orientation == Orientation::vertical ? vBaseH : hBaseH; }
+    float baseW() const
+    {
+        return zenMode ? 960.0f
+                       : (orientation == Orientation::vertical ? vBaseW : hBaseW);
+    }
+
+    /** 纯享模式下画布比例跟窗口一致，缩放才会均匀、铺满不留黑边。 */
+    float baseH() const
+    {
+        if (zenMode)
+        {
+            const float w = juce::jmax (1.0f, static_cast<float> (getWidth()));
+            const float h = juce::jmax (1.0f, static_cast<float> (getHeight()));
+            return 960.0f * h / w;
+        }
+
+        return orientation == Orientation::vertical ? vBaseH : hBaseH;
+    }
 
     void timerCallback() override;
     void buttonClicked (juce::Button* button) override;
@@ -99,6 +116,7 @@ private:
     void paintTapStage (juce::Graphics& g, juce::Rectangle<float> area);
     void paintSettings (juce::Graphics& g, juce::Rectangle<float> panel);
     void paintAbout    (juce::Graphics& g, juce::Rectangle<float> panel);
+    void paintInfoLine (juce::Graphics& g);
     void drawText    (juce::Graphics& g, juce::Rectangle<float> area,
                       const juce::String& text, float size, juce::Colour colour,
                       bool bold, int sungChars = -1,
@@ -158,6 +176,8 @@ private:
     juce::String timecodeText (double t) const;
     juce::String barBeatText() const;
     juce::String audioRangeText() const;
+    juce::String hintText() const;
+    void updateHint (bool force);
 
     juce::Font uiFont (float size, bool bold = false) const;
     juce::Colour lyricColour() const;
@@ -201,6 +221,9 @@ private:
     bool   settingsOpen    = false;
     bool   aboutOpen       = false;
     bool   updatingCombos  = false;
+    bool   showHints       = true;         // 左下角轮播提示开关
+    int    hintIndex       = 0;
+    double hintRotateMs    = 0.0;
     bool   zenMode         = false;        // 纯享全屏（只显示歌词）
     int    sizeBeforeZenW  = 960;
     int    sizeBeforeZenH  = 600;
@@ -257,6 +280,7 @@ private:
     juce::TextButton  tapExitButton;
     juce::TextButton  measureButton;
     juce::TextButton  exportButton;
+    juce::TextButton  hintToggle;
 
     juce::TextButton  demoClockToggle;
 
@@ -267,7 +291,7 @@ private:
 
     juce::Slider fontSlider  { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
 
-    juce::Label offsetLabel, fileLabel, metaLabel, hintLabel, fontLabel, audioLabel;
+    juce::Label offsetLabel, fileLabel, hintLabel, fontLabel, audioLabel;
     juce::TextEditor editorBox;
 
     std::unique_ptr<juce::TooltipWindow> tooltipWindow;
