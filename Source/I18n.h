@@ -127,7 +127,7 @@ namespace Lang
         tipZoom,
         tipLayout,
         tipSkin,
-        tipFont,
+        tipTypeface,
         tipColor,
         tipPickImage,
         tipClearImage,

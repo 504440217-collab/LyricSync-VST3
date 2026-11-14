@@ -35,7 +35,7 @@ class IconButton : public juce::Button
 public:
     enum class Icon { gear, close, none };
 
-    explicit IconButton (Icon iconToDraw) : juce::Button ({}), icon (iconToDraw) {}
+    explicit IconButton (Icon iconToDraw) : juce::Button (juce::String()), icon (iconToDraw) {}
 
     void paintButton (juce::Graphics& g, bool over, bool down) override;
 

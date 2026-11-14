@@ -180,7 +180,7 @@ TABLE = [
                     "Plugin window size (remembered for this project)"),
     ("tipLayout",   "横版 / 竖版布局，控件会跟着重排", "Landscape / portrait layout"),
     ("tipSkin",     "选择界面皮肤，或用自己的图片做背景", "Pick a skin, or use your own image"),
-    ("tipFont",     "歌词字体", "Lyrics typeface"),
+    ("tipTypeface", "歌词字体（typeface）", "Lyrics typeface"),
     ("tipColor",    "歌词文字颜色", "Lyrics text colour"),
     ("tipPickImage", "上传一张图片作为自定义皮肤背景", "Use your own image as the skin background"),
     ("tipClearImage", "清除自定义背景图片", "Remove the custom background image"),
@@ -259,6 +259,11 @@ def cpp_string(text):
     flush()
     return " ".join(parts) if parts else '""'
 
+
+_keys = [k for k, _zh, _en in TABLE]
+_dups = sorted({k for k in _keys if _keys.count(k) > 1})
+if _dups:
+    raise SystemExit("duplicate i18n keys: %s" % ", ".join(_dups))
 
 ROOT = Path(__file__).resolve().parent.parent
 

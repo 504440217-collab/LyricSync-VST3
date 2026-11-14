@@ -551,7 +551,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     logoButton      .setTooltip (tr (Lang::TextId::tipLogo));
     zoomBox         .setTooltip (tr (Lang::TextId::tipZoom));
     skinBox         .setTooltip (tr (Lang::TextId::tipSkin));
-    fontBox         .setTooltip (tr (Lang::TextId::tipFont));
+    fontBox         .setTooltip (tr (Lang::TextId::tipTypeface));
     colourBox       .setTooltip (tr (Lang::TextId::tipColor));
     languageBox     .setTooltip (tr (Lang::TextId::uiLanguage));
     orientHButton   .setTooltip (tr (Lang::TextId::tipLayout));
