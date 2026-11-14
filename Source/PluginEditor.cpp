@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.7.1";
+    const char* const kVersion = "1.7.2";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -1005,7 +1005,7 @@ juce::Rectangle<float> LyricSyncEditor::stageArea() const
         return { 10.0f, 10.0f, baseW() - 20.0f, baseH() - 20.0f };
 
     if (orientation == Orientation::vertical)
-        return { vShift() + 22.0f, 72.0f, baseW() - 44.0f, 556.0f };
+        return { 22.0f, 72.0f, baseW() - 44.0f, 556.0f };
 
     return { 22.0f, 72.0f, hBaseW - 44.0f, 394.0f };
 }
@@ -1013,7 +1013,7 @@ juce::Rectangle<float> LyricSyncEditor::stageArea() const
 juce::Rectangle<float> LyricSyncEditor::settingsPanelArea() const
 {
     if (orientation == Orientation::vertical)
-        return { vShift() + 40.0f, 150.0f, 520.0f, 540.0f };
+        return { juce::jmax (20.0f, (baseW() - 520.0f) * 0.5f), 150.0f, 520.0f, 540.0f };
 
     return { 200.0f, 66.0f, 560.0f, 470.0f };
 }
@@ -1035,6 +1035,9 @@ void LyricSyncEditor::updateScaledFonts()
     audioLabel .setFont (uiFont (11.5f * uiScale));
     editorBox  .setFont (uiFont (14.0f  * uiScale));
     editorBox.applyFontToAllText (uiFont (14.0f * uiScale));
+
+    tapTextEditor.applyFontToAllText (uiFont (13.0f * uiScale));
+    tapTimeEditor.applyFontToAllText (uiFont (13.0f * uiScale));
 }
 
 void LyricSyncEditor::applyWindowSize()
@@ -1189,8 +1192,8 @@ void LyricSyncEditor::resized()
             measureButton  .setBounds (scaledRect (ox + 342, 720, 150, 30));
         }
 
-        fileLabel .setBounds (scaledRect (ox + 22, 762, baseW() - 44.0f, 22));
-        hintLabel .setBounds (scaledRect (ox + 22, 812, baseW() - 44.0f, 20));
+        fileLabel .setBounds (scaledRect (22, 762, baseW() - 44.0f, 22));
+        hintLabel .setBounds (scaledRect (22, 812, baseW() - 44.0f, 20));
         audioLabel.setBounds (scaledRect (ox + 22, 836, 240, 22));
         exportButton.setBounds (scaledRect (ox + 270, 836, 200, 26));
         retempoButton.setBounds (scaledRect (ox + 478, 836, 100, 26));
@@ -1234,8 +1237,7 @@ void LyricSyncEditor::resized()
     {
         if (orientation == Orientation::vertical)
         {
-            const float ox = vShift();
-            const float cx = ox + 40.0f, cy = 300.0f, cw = baseW() - 80.0f;
+            const float cx = 40.0f, cy = 300.0f, cw = baseW() - 80.0f;
 
             tapTextEditor.setBounds (scaledRect (cx + 20, cy + 50, cw - 40, 30));
             tapTimeEditor.setBounds (scaledRect (cx + 84, cy + 92, 150, 26));
@@ -1687,7 +1689,7 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
         const bool v = (orientation == Orientation::vertical);
 
         const juce::Rectangle<float> card = v
-            ? juce::Rectangle<float> (vShift() + 40.0f, 300.0f, baseW() - 80.0f, 200.0f)
+            ? juce::Rectangle<float> (40.0f, 300.0f, baseW() - 80.0f, 200.0f)
             : juce::Rectangle<float> (60.0f, 250.0f, 540.0f, 190.0f);
 
         g.setColour (palette.card.withAlpha (0.94f));
@@ -1843,7 +1845,7 @@ void LyricSyncEditor::paintInfoLine (juce::Graphics& g)
     // 右下角只显示加粗的测速结果；时间码在右上角已经有了，
     // 这里右侧的位置留给「重新测速」按钮。
     const bool v = (orientation == Orientation::vertical);
-    const auto area = v ? juce::Rectangle<float> (vShift() + 22.0f, 786.0f,
+    const auto area = v ? juce::Rectangle<float> (22.0f, 786.0f,
                                                   baseW() - 44.0f, 22.0f)
                         : juce::Rectangle<float> (452.0f, 518.0f, 380.0f, 22.0f);
 
@@ -2162,6 +2164,18 @@ void LyricSyncEditor::updateHint (bool force)
 {
     juce::ignoreUnused (force);
     hintLabel.setText (showHints ? hintText() : juce::String(), juce::dontSendNotification);
+
+    // 「界面提示」关掉时，鼠标悬停说明也一起关掉（连 TooltipWindow 都销毁，
+    // 只 setVisible(false) 不行 —— 它自己的定时器会再把自己显示出来）
+    if (showHints)
+    {
+        if (tooltipWindow == nullptr)
+            tooltipWindow = std::make_unique<juce::TooltipWindow> (this, 550);
+    }
+    else if (tooltipWindow != nullptr)
+    {
+        tooltipWindow.reset();
+    }
 }
 
 juce::String LyricSyncEditor::timecodeText (double t) const
