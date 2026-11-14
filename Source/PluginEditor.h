@@ -132,7 +132,7 @@ private:
     void paintInfoLine (juce::Graphics& g);
     void drawText    (juce::Graphics& g, juce::Rectangle<float> area,
                       const juce::String& text, float size, juce::Colour colour,
-                      bool bold, int sungChars = -1,
+                      bool bold, float sungProgress = -1.0f,
                       juce::Colour sungColour = {}, float alpha = 1.0f,
                       juce::Justification just = juce::Justification::centred);
 
