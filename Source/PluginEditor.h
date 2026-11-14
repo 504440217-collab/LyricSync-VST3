@@ -26,9 +26,6 @@ public:
     juce::Font getLabelFont      (juce::Label&) override;
     juce::Font getPopupMenuFont  () override;
     juce::Font getSliderPopupFont (juce::Slider&) override;
-
-    /** 颜色一改就让所有控件重新读色（否则 ComboBox 内部的 Label 会留着旧色）。 */
-    void colourChanged() override { sendLookAndFeelChange(); }
 };
 
 //==============================================================================

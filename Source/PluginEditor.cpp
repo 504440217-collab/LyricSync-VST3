@@ -716,6 +716,10 @@ void LyricSyncEditor::refreshLookAndFeel()
                                   juce::dontSendNotification);
 
     editorBox.applyFontToAllText (uiFont (14.0f * uiScale));
+
+    // 让所有子控件重新读一次颜色（ComboBox / Label 会缓存文字色，换皮肤后必须刷新）
+    sendLookAndFeelChange();
+
     repaint();
 }
 
