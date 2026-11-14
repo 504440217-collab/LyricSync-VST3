@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.6.0";
+    const char* const kVersion = "1.6.1";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -296,26 +296,36 @@ void ScaledLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b
                                              bool over, bool down)
 {
     const auto r = b.getLocalBounds().toFloat().reduced (0.5f);
-    const float corner = juce::jmax (4.0f, 8.0f * scale);
+    const float corner = juce::jmax (5.0f, 10.0f * scale);
+
+    // 用按钮自己的文字色做"边缘色"：深色主题→淡白边，浅色主题→淡黑边
+    const auto edge = b.findColour (juce::TextButton::textColourOffId);
 
     auto fill = backgroundColour;
 
-    if (down)        fill = fill.brighter (0.14f);
-    else if (over)   fill = fill.brighter (0.07f);
+    if (b.getToggleState())
+        fill = findColour (juce::TextButton::buttonOnColourId);
 
-    g.setColour (fill);
+    // 上亮下暗的极轻渐变，让平面色块有玻璃的体积
+    juce::ColourGradient glass (fill.brighter (down ? 0.22f : (over ? 0.14f : 0.06f)),
+                                r.getX(), r.getY(),
+                                fill.darker (0.05f),
+                                r.getX(), r.getBottom(), false);
+    g.setGradientFill (glass);
     g.fillRoundedRectangle (r, corner);
 
-    // 玻璃高光：hover 时描边更亮
-    g.setColour (juce::Colours::white.withAlpha (over ? 0.22f : 0.10f));
-    g.drawRoundedRectangle (r, corner, juce::jmax (1.0f, 1.0f * scale));
+    // 边缘：常态 26%，hover 45%
+    g.setColour (edge.withAlpha (over ? 0.45f : 0.26f));
+    g.drawRoundedRectangle (r.reduced (0.4f), corner, juce::jmax (1.0f, 1.1f * scale));
 
-    if (b.getToggleState())
+    // 顶部一道更亮的高光，只有上沿，像玻璃反光
     {
-        g.setColour (findColour (juce::TextButton::buttonOnColourId).withAlpha (0.85f));
-        g.fillRoundedRectangle (r, corner);
-        g.setColour (juce::Colours::white.withAlpha (0.30f));
-        g.drawRoundedRectangle (r, corner, juce::jmax (1.0f, 1.0f * scale));
+        juce::Path top;
+        top.addRoundedRectangle (r.getX() + corner * 0.8f, r.getY() + 0.9f,
+                                 r.getWidth() - corner * 1.6f, juce::jmax (2.0f, 3.0f * scale),
+                                 corner * 0.4f);
+        g.setColour (juce::Colours::white.withAlpha (b.getToggleState() ? 0.22f : 0.10f));
+        g.fillPath (top);
     }
 }
 
@@ -330,8 +340,8 @@ void ScaledLookAndFeel::drawComboBox (juce::Graphics& g, int width, int height, 
     g.setColour (box.findColour (juce::ComboBox::backgroundColourId));
     g.fillRoundedRectangle (r, corner);
 
-    g.setColour (juce::Colours::white.withAlpha (0.10f));
-    g.drawRoundedRectangle (r, corner, juce::jmax (1.0f, 1.0f * scale));
+    g.setColour (box.findColour (juce::ComboBox::textColourId).withAlpha (0.22f));
+    g.drawRoundedRectangle (r.reduced (0.4f), corner, juce::jmax (1.0f, 1.1f * scale));
 
     // 下拉箭头（自绘，避免依赖字体字形）
     const float cx = static_cast<float> (width) - 16.0f * juce::jmax (0.85f, scale);
@@ -806,7 +816,7 @@ void LyricSyncEditor::refreshLookAndFeel()
     auto& l = lookAndFeel;
 
     // 极夜玻璃：按钮本身几乎透明，只靠 1px 高光边和一层薄色区分
-    l.setColour (juce::TextButton::buttonColourId,   palette.text.withAlpha (0.070f));
+    l.setColour (juce::TextButton::buttonColourId,   palette.text.withAlpha (0.105f));
     l.setColour (juce::TextButton::buttonOnColourId, palette.accent.withAlpha (0.26f));
     l.setColour (juce::TextButton::textColourOffId,  palette.dim);
     l.setColour (juce::TextButton::textColourOnId,   palette.text);
@@ -824,7 +834,7 @@ void LyricSyncEditor::refreshLookAndFeel()
     l.setColour (juce::TextEditor::focusedOutlineColourId,  palette.accent);
     l.setColour (juce::TextEditor::highlightColourId,       palette.accentSoft.withAlpha (0.35f));
 
-    l.setColour (juce::ComboBox::backgroundColourId,  palette.text.withAlpha (0.055f));
+    l.setColour (juce::ComboBox::backgroundColourId,  palette.text.withAlpha (0.085f));
     l.setColour (juce::ComboBox::textColourId,        palette.text);
     l.setColour (juce::ComboBox::outlineColourId,     palette.panelEdge.withAlpha (0.55f));
     l.setColour (juce::ComboBox::arrowColourId,       palette.dim);
@@ -1197,7 +1207,7 @@ void LyricSyncEditor::paint (juce::Graphics& g)
         g.drawImage (customBg, juce::Rectangle<float> ((bounds.getWidth() - iw) * 0.5f,
                                                        (bounds.getHeight() - ih) * 0.5f, iw, ih));
 
-        g.setColour (palette.bgTop.withAlpha (0.62f));
+        g.setColour (palette.bgTop.withAlpha (0.68f));
         g.fillAll();
     }
     else
@@ -1207,22 +1217,25 @@ void LyricSyncEditor::paint (juce::Graphics& g)
         g.setGradientFill (gradient);
         g.fillAll();
 
-        // 两层柔光：右上青绿、左下靛蓝，让深色背景有玻璃质感
+    }
+
+    // 两层柔光：右上青绿、左下靛蓝。自定义图片皮肤也叠，否则照片会把氛围全挡住。
+    {
         const float w = bounds.getWidth();
         const float h = bounds.getHeight();
 
         const auto glow = [&g] (float cx, float cy, float radius, juce::Colour c)
         {
-            for (int i = 0; i < 4; ++i)
+            for (int i = 0; i < 5; ++i)
             {
-                const float rr = radius * (1.0f - 0.22f * static_cast<float> (i));
-                g.setColour (c.withAlpha (0.030f));
+                const float rr = radius * (1.0f - 0.18f * static_cast<float> (i));
+                g.setColour (c.withAlpha (0.040f));
                 g.fillEllipse (cx - rr, cy - rr, rr * 2.0f, rr * 2.0f);
             }
         };
 
-        glow (w * 0.84f, h * 0.02f, w * 0.36f, palette.accent);
-        glow (w * 0.06f, h * 1.02f, w * 0.32f, juce::Colour (0xff5b7bff));
+        glow (w * 0.84f, h * 0.02f, w * 0.40f, palette.accent);
+        glow (w * 0.06f, h * 1.02f, w * 0.34f, juce::Colour (0xff5b7bff));
     }
 
     // 逻辑画布
@@ -1308,20 +1321,32 @@ void LyricSyncEditor::paintHeader (juce::Graphics& g)
 
 void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area)
 {
-    g.setColour (palette.card.withAlpha (0.82f));
-    g.fillRoundedRectangle (area, 20.0f);
+    // 用「文字色 + 低透明度」做玻璃：深色主题是薄薄一层白，浅色主题是薄薄一层黑
+    g.setColour (palette.text.withAlpha (0.055f));
+    g.fillRoundedRectangle (area, 22.0f);
 
-    // 外描边 + 内侧顶部高光，模拟一块玻璃
-    g.setColour (palette.panelEdge.withAlpha (0.60f));
-    g.drawRoundedRectangle (area, 20.0f, 1.0f);
+    // 上亮下暗的渐变，做出玻璃的厚度感
+    {
+        juce::ColourGradient thick (juce::Colours::transparentBlack,
+                                    area.getX(), area.getCentreY(),
+                                    juce::Colours::black.withAlpha (0.16f),
+                                    area.getX(), area.getBottom(), false);
+        g.setGradientFill (thick);
+        g.fillRoundedRectangle (area, 22.0f);
+    }
 
-    // 上半部到中部渐隐的白色高光（Path 没有逐角重载，这里用渐变填充更稳）
-    juce::ColourGradient sheen (juce::Colours::white.withAlpha (0.055f),
-                                area.getX(), area.getY(),
-                                juce::Colours::transparentWhite,
-                                area.getX(), area.getCentreY(), false);
-    g.setGradientFill (sheen);
-    g.fillRoundedRectangle (area.reduced (1.5f), 19.0f);
+    // 外描边：比填充亮一档，就是"玻璃边缘"
+    g.setColour (palette.text.withAlpha (0.16f));
+    g.drawRoundedRectangle (area.reduced (0.5f), 22.0f, 1.2f);
+
+    // 顶部内侧一道高光
+    {
+        juce::Path topEdge;
+        topEdge.addRoundedRectangle (area.getX() + 18.0f, area.getY() + 1.2f,
+                                     area.getWidth() - 36.0f, 10.0f, 5.0f);
+        g.setColour (palette.text.withAlpha (0.10f));
+        g.fillPath (topEdge);
+    }
 
     if (tapMode)
     {
