@@ -280,6 +280,7 @@ private:
     juce::TextButton  tapExitButton;
     juce::TextButton  measureButton;
     juce::TextButton  exportButton;
+    juce::TextButton  retempoButton;
     juce::TextButton  hintToggle;
 
     juce::TextButton  demoClockToggle;

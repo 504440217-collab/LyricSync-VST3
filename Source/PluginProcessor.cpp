@@ -389,6 +389,15 @@ void TempoTracker::pushBlock (const juce::AudioBuffer<float>& buffer) noexcept
     if (numCh <= 0 || numSamples <= 0 || hopSamples <= 0)
         return;
 
+    // 用户按了「重新测速」：在这一帧里把环形缓冲清干净（音频线程做，无锁竞争）
+    if (resetRequested.exchange (false, std::memory_order_relaxed))
+    {
+        writeIndex.store (0, std::memory_order_relaxed);
+        available.store (0, std::memory_order_relaxed);
+        hopSum = 0.0f;
+        hopFill = 0;
+    }
+
     int pos = 0;
 
     while (pos < numSamples)

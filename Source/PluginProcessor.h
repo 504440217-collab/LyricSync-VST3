@@ -23,6 +23,14 @@ public:
     void pushBlock (const juce::AudioBuffer<float>& buffer) noexcept;   // 音频线程
     void analyse() noexcept;                                            // GUI 线程
 
+    /** GUI 线程请求清空已采集的能量，下一次音频回调里真正清掉。 */
+    void requestReset() noexcept
+    {
+        resetRequested.store (true, std::memory_order_relaxed);
+        bpm = 0.0;
+        confidence = 0.0;
+    }
+
     double bpm        = 0.0;
     double confidence = 0.0;
 
@@ -32,6 +40,7 @@ private:
     float energy[maxHops] {};
     std::atomic<int> writeIndex { 0 };
     std::atomic<int> available  { 0 };
+    std::atomic<bool> resetRequested { false };
 
     int    hopSamples = 480;
     double hopSeconds = 0.01;
@@ -137,6 +146,7 @@ public:
 
     //---- 节拍检测（GUI 线程读） ---------------------------------------------
     void   analyseTempo()  noexcept { tempo.analyse(); }
+    void   resetTempo()    noexcept { tempo.requestReset(); }
     double detectedBpm()   const noexcept { return tempo.bpm; }
     double beatConfidence() const noexcept { return tempo.confidence; }
 

@@ -145,6 +145,8 @@ namespace Lang
         tipExport,
         zenExit,
         bpmPrefix,
+        retempo,
+        tipRetempo,
         wordFormat,
         showHints,
         onLabel,

@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.5.4";
+    const char* const kVersion = "1.5.5";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     const char* const kFontNames[] =
@@ -366,7 +366,7 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
                      &demoPlayButton, &demoStopButton,
                      &applyTextButton, &cancelTextButton,
                      &tapStartButton, &tapUndoButton, &tapFinishButton, &tapExitButton,
-                     &measureButton, &exportButton, &demoClockToggle,
+                     &measureButton, &exportButton, &retempoButton, &demoClockToggle,
                      &orientHButton, &orientVButton, &pickImageButton, &clearImageButton,
                      &hintToggle })
     {
@@ -602,6 +602,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     tapExitButton   .setButtonText (tr (Lang::TextId::tapExit));
     measureButton   .setButtonText (tr (Lang::TextId::measureAudio));
     exportButton    .setButtonText (tr (Lang::TextId::exportLrc));
+    retempoButton   .setButtonText (tr (Lang::TextId::retempo));
 
     orientHButton   .setButtonText (tr (Lang::TextId::orientH));
     orientVButton   .setButtonText (tr (Lang::TextId::orientV));
@@ -677,6 +678,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     tapExitButton   .setTooltip (tr (Lang::TextId::tipExit));
     measureButton   .setTooltip (tr (Lang::TextId::tipMeasure));
     exportButton    .setTooltip (tr (Lang::TextId::tipExport));
+    retempoButton   .setTooltip (tr (Lang::TextId::tipRetempo));
     audioLabel      .setTooltip (tr (Lang::TextId::audioUnknown));
     editorBox       .setTooltip (tr (Lang::TextId::tipPaste));
 
@@ -793,11 +795,18 @@ void LyricSyncEditor::updateVisibility()
                      static_cast<juce::Component*> (&demoClockToggle),
                      static_cast<juce::Component*> (&measureButton),
                      static_cast<juce::Component*> (&exportButton),
+                     static_cast<juce::Component*> (&retempoButton),
                      static_cast<juce::Component*> (&gearButton) })
         c->setVisible (normal);
 
     demoPlayButton .setVisible (normal && demoMode);
     demoStopButton .setVisible (normal && demoMode);
+
+    // 纯享模式把上面这些都隐藏过，回来必须逐个恢复；
+    // 这三个 Label 不在上面那批里，之前漏掉，导致退出全屏后提示词永久消失。
+    fileLabel .setVisible (normal);
+    audioLabel.setVisible (normal);
+    hintLabel .setVisible (normal && showHints);
 
     applyTextButton .setVisible (editing && ! overlay);
     cancelTextButton.setVisible (editing && ! overlay);
@@ -970,6 +979,7 @@ void LyricSyncEditor::resized()
         fileLabel .setBounds (scaledRect (22, 518, 420, 22));
         hintLabel .setBounds (scaledRect (22, 542, 540, 20));
         audioLabel.setBounds (scaledRect (566, 541, 110, 22));
+        retempoButton.setBounds (scaledRect (836, 512, 102, 24));
     }
     else
     {
@@ -1013,6 +1023,7 @@ void LyricSyncEditor::resized()
         hintLabel .setBounds (scaledRect (22, 812, 556, 20));
         audioLabel.setBounds (scaledRect (22, 836, 240, 22));
         exportButton.setBounds (scaledRect (270, 836, 200, 26));
+        retempoButton.setBounds (scaledRect (478, 836, 100, 26));
     }
 
     //---- Settings panel -----------------------------------------------------
@@ -1478,25 +1489,21 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
 //==============================================================================
 void LyricSyncEditor::paintInfoLine (juce::Graphics& g)
 {
-    // 右下角只留两样东西：测速 BPM（加粗）+ 当前时间码
+    // 右下角只显示加粗的测速结果；时间码在右上角已经有了，
+    // 这里右侧的位置留给「重新测速」按钮。
     const bool v = (orientation == Orientation::vertical);
     const auto area = v ? juce::Rectangle<float> (22.0f, 786.0f, 556.0f, 22.0f)
-                        : juce::Rectangle<float> (452.0f, 518.0f, 486.0f, 22.0f);
+                        : juce::Rectangle<float> (452.0f, 518.0f, 380.0f, 22.0f);
 
-    const juce::String bpmText = detectedBpm > 0.0
-        ? tr (Lang::TextId::bpmPrefix) + juce::String (detectedBpm, 1)
-        : tr (Lang::TextId::bpmPrefix) + juce::String ("--");
-    const juce::String timeText = timecodeText (displayTime);
+    const juce::String bpmText = tr (Lang::TextId::bpmPrefix)
+                               + (detectedBpm > 0.0 ? juce::String (detectedBpm, 1)
+                                                    : juce::String ("--"));
 
     juce::AttributedString s;
     s.setJustification (juce::Justification::centredRight);
     s.append (bpmText, uiFont (14.0f, true));
-    s.append ("    ", uiFont (14.0f, true));
-    s.append (timeText, uiFont (12.5f, false));
-
-    s.setColour (juce::Range<int> (0, bpmText.length()), palette.accent);
-    s.setColour (juce::Range<int> (bpmText.length(),
-                                   bpmText.length() + 4 + timeText.length()), palette.dim);
+    s.setColour (juce::Range<int> (0, bpmText.length()),
+                 detectedBpm > 0.0 ? palette.accent : palette.faint);
 
     const juce::Graphics::ScopedSaveState state (g);
     s.draw (g, area);
@@ -1858,6 +1865,15 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
     if (button == &demoStopButton)      { demoPlaying = false; return; }
     if (button == &measureButton)       { resetAudioMeasurement(); return; }
     if (button == &exportButton)        { exportLyrics(); return; }
+
+    if (button == &retempoButton)
+    {
+        processor.resetTempo();
+        detectedBpm = 0.0;
+        tempoAnalyseMs = 0.0;      // 下一帧立刻重新分析
+        repaint();
+        return;
+    }
 
     if (button == &tapStartButton)      { enterTapMode(); return; }
     if (button == &tapUndoButton)       { undoStamp(); return; }
