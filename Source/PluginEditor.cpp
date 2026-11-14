@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.5.0";
+    const char* const kVersion = "1.5.1";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     const char* const kFontNames[] =
@@ -19,6 +19,13 @@ namespace
         "KaiTi", "FangSong", "Segoe UI", "Arial"
     };
     const int kNumFonts = static_cast<int> (sizeof (kFontNames) / sizeof (kFontNames[0]));
+
+    // 前 6 个字体用中文名显示，后两个（Segoe UI / Arial）本来就是拉丁名
+    const Lang::TextId kFontLabelIds[] =
+    {
+        Lang::TextId::fontYaHei, Lang::TextId::fontDengXian, Lang::TextId::fontSimHei,
+        Lang::TextId::fontSimSun, Lang::TextId::fontKaiTi, Lang::TextId::fontFangSong
+    };
 
     // 0 = 跟随皮肤（用 accent）
     const juce::uint32 kLyricColours[] =
@@ -267,7 +274,13 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     loadUiPrefs();
     syncControlsFromSettings();
 
-    setResizable (false, false);
+    // 右下角缩放柄回来了：自由拖拽即"无极缩放"，画布始终按比例整体缩放。
+    setResizable (true, true);
+    setResizeLimits (280, 280, 2600, 2600);
+
+    if (auto* constrainer = getConstrainer())
+        constrainer->setFixedAspectRatio (static_cast<double> (baseW() / baseH()));
+
     applyWindowSize();
 
     //--------------------------------------------------------------------------
@@ -312,8 +325,6 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
         addAndMakeVisible (l);
     };
 
-    addLabel (clockLabel,  21.0f, true,  juce::Justification::centredRight);
-    addLabel (statusLabel, 11.0f, false, juce::Justification::centredRight);
     addLabel (offsetLabel, 12.0f, true,  juce::Justification::centred);
     addLabel (fileLabel,   11.5f, false, juce::Justification::centredLeft);
     addLabel (metaLabel,   11.5f, false, juce::Justification::centredRight);
@@ -328,7 +339,18 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     editorBox.setPopupMenuEnabled (true);
     addChildComponent (editorBox);
 
-    fileDescription = tr (Lang::TextId::demoFileDesc);
+    // 工程里存的是不是内置示例？只有"没存过"或"正好是示例"才用当前语言重载，
+    // 否则绝不覆盖用户歌词（这是"关掉插件窗口再打开，歌词没了"的根因）。
+    const auto storedLyrics = processor.getSetting (Settings::lyricsText, "").toString();
+    usingDemoLyrics = storedLyrics.trim().isEmpty()
+                   || storedLyrics == demoLyricsText (0)
+                   || storedLyrics == demoLyricsText (1);
+
+    if (! usingDemoLyrics)
+        processor.reloadFromSettings (language);
+
+    fileDescription = tr (usingDemoLyrics ? Lang::TextId::demoFileDesc
+                                          : Lang::TextId::savedFileDesc);
 
     applyUiText (true);
     refreshLookAndFeel();
@@ -514,7 +536,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
 
     fontBox.clear (juce::dontSendNotification);
     for (int i = 0; i < kNumFonts; ++i)
-        fontBox.addItem (kFontNames[i], i + 1);
+        fontBox.addItem (i < 6 ? tr (kFontLabelIds[i]) : juce::String (kFontNames[i]), i + 1);
     fontBox.setSelectedId (fontIndex + 1, juce::dontSendNotification);
 
     colourBox.clear (juce::dontSendNotification);
@@ -605,8 +627,6 @@ void LyricSyncEditor::refreshLookAndFeel()
     l.setColour (juce::TooltipWindow::textColourId,       palette.text);
     l.setColour (juce::TooltipWindow::outlineColourId,    palette.panelEdge);
 
-    clockLabel.setColour (juce::Label::textColourId, palette.text);
-    statusLabel.setColour (juce::Label::textColourId, palette.dim);
     offsetLabel.setColour (juce::Label::textColourId, palette.accent);
     offsetLabel.setColour (juce::Label::backgroundColourId, palette.card);
     hintLabel.setColour (juce::Label::textColourId, palette.faint);
@@ -715,8 +735,6 @@ juce::Rectangle<float> LyricSyncEditor::aboutPanelArea() const
 
 void LyricSyncEditor::updateScaledFonts()
 {
-    clockLabel .setFont (uiFont (21.0f  * uiScale, true));
-    statusLabel.setFont (uiFont (11.0f  * uiScale));
     offsetLabel.setFont (uiFont (12.0f  * uiScale, true));
     fileLabel  .setFont (uiFont (11.5f * uiScale));
     metaLabel  .setFont (uiFont (11.5f * uiScale));
@@ -758,8 +776,6 @@ void LyricSyncEditor::resized()
     if (orientation == Orientation::horizontal)
     {
         gearButton   .setBounds (scaledRect (882, 12, 46, 46));
-        clockLabel   .setBounds (scaledRect (520, 8, 340, 30));
-        statusLabel  .setBounds (scaledRect (520, 37, 340, 18));
 
         editorBox.setBounds (scaledRect (stage.getX() + 2.0f, stage.getY() + 2.0f,
                                          stage.getWidth() - 4.0f, stage.getHeight() - 4.0f));
@@ -813,8 +829,6 @@ void LyricSyncEditor::resized()
     else
     {
         gearButton   .setBounds (scaledRect (532, 12, 46, 46));
-        clockLabel   .setBounds (scaledRect (300, 6, 226, 30));
-        statusLabel  .setBounds (scaledRect (300, 36, 226, 18));
 
         editorBox.setBounds (scaledRect (stage.getX() + 2.0f, stage.getY() + 2.0f,
                                          stage.getWidth() - 4.0f, stage.getHeight() - 4.0f));
@@ -972,6 +986,27 @@ void LyricSyncEditor::paintHeader (juce::Graphics& g)
         drawText (g, juce::Rectangle<float> (48.0f, 35.0f, 330.0f, 18.0f),
                   tr (Lang::TextId::appSubtitle), 11.0f, palette.faint, false, -1, {}, 1.0f,
                   juce::Justification::centredLeft);
+
+    // 时间码 + 状态：直接用 Graphics 画（不用 Label 组件），
+    // 这样右上方永远只有这两个字符串，不会出现任何标签叠加/残影。
+    {
+        const bool v = (orientation == Orientation::vertical);
+        const float rightEdge = baseW() - 100.0f;
+        const float textW = v ? 236.0f : 350.0f;
+        const auto area = juce::Rectangle<float> (rightEdge - textW, 0.0f, textW, 56.0f);
+
+        g.setColour (palette.text);
+        g.setFont (uiFont (21.0f, true));
+        g.drawText (timecodeText (displayTime),
+                    area.withHeight (34.0f).translated (0.0f, 3.0f),
+                    juce::Justification::centredRight, false);
+
+        g.setColour (palette.dim);
+        g.setFont (uiFont (10.5f));
+        g.drawText (statusText(),
+                    area.withTrimmedTop (38.0f).withHeight (17.0f),
+                    juce::Justification::centredRight, true);
+    }
 
     const bool live = ! demoMode && processor.hasHostTime.load()
                    && (juce::Time::getMillisecondCounterHiRes() - lastHostUpdateMs < 1800.0);
@@ -1401,8 +1436,6 @@ void LyricSyncEditor::timerCallback()
 
 void LyricSyncEditor::updateLabels (double t)
 {
-    clockLabel .setText (timecodeText (t), juce::dontSendNotification);
-    statusLabel.setText (statusText(), juce::dontSendNotification);
     offsetLabel.setText (juce::String (offsetMs, 0) + " ms", juce::dontSendNotification);
     metaLabel  .setText (barBeatText(), juce::dontSendNotification);
     audioLabel .setText (audioRangeText(), juce::dontSendNotification);
@@ -1699,6 +1732,10 @@ void LyricSyncEditor::setOrientation (Orientation next)
     processor.setSetting (Settings::orientation,
                           orientation == Orientation::vertical ? 1 : 0);
     saveUiPrefs();
+
+    if (auto* constrainer = getConstrainer())
+        constrainer->setFixedAspectRatio (static_cast<double> (baseW() / baseH()));
+
     applyWindowSize();
     refreshLookAndFeel();
     resized();

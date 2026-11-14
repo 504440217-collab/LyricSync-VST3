@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(LyricSync VERSION 1.5.0 LANGUAGES CXX)
+project(LyricSync VERSION 1.5.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,7 +31,7 @@ else()
 endif()
 
 juce_add_plugin(LyricSync
-    COMPANY_NAME                  "Muzi Audio Tools"
+    COMPANY_NAME                  "Muzi Audio Tool"
     PLUGIN_MANUFACTURER_CODE      Muzy
     PLUGIN_CODE                   LySy
     FORMATS                       VST3 Standalone

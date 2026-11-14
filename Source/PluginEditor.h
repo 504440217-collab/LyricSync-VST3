@@ -245,8 +245,7 @@ private:
 
     juce::Slider fontSlider  { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
 
-    juce::Label clockLabel, statusLabel, offsetLabel, fileLabel, metaLabel,
-                hintLabel, fontLabel, audioLabel;
+    juce::Label offsetLabel, fileLabel, metaLabel, hintLabel, fontLabel, audioLabel;
     juce::TextEditor editorBox;
 
     std::unique_ptr<juce::TooltipWindow> tooltipWindow;
