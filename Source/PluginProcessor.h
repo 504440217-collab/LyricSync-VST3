@@ -21,6 +21,14 @@ namespace Settings
     inline const juce::Identifier demoClock  { "demoClock" };
     inline const juce::Identifier language  { "language" };   // 0 = 中文, 1 = English
     inline const juce::Identifier stateVersion { "stateVersion" };
+
+    //---- 界面外观（-1 / 空 表示"没设置过"，此时用全局默认） -----------------
+    inline const juce::Identifier skin        { "skin" };        // 皮肤序号
+    inline const juce::Identifier zoom        { "zoom" };        // 窗口比例 % (50..200)
+    inline const juce::Identifier orientation { "orientation" };  // 0 横版 / 1 竖版
+    inline const juce::Identifier font        { "font" };         // 字体序号
+    inline const juce::Identifier colour      { "colour" };       // 歌词颜色序号
+    inline const juce::Identifier customBg    { "customBg" };     // 自定义背景图路径
     // 从轨道实际音频测得的范围（秒，工程时间）。-1 表示尚未测到。
     inline const juce::Identifier audioStart { "audioStart" };
     inline const juce::Identifier audioEnd   { "audioEnd" };

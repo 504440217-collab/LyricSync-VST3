@@ -19,6 +19,7 @@ class ScaledLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
     float scale = 1.0f;
+    juce::String typeface { "Microsoft YaHei UI" };
 
     juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
     juce::Font getComboBoxFont   (juce::ComboBox&) override;
@@ -28,23 +29,31 @@ public:
 };
 
 //==============================================================================
+/** 无文字的图标按钮（齿轮 / 关闭），用 Path 画，不依赖字体里有没有该字形。 */
+class IconButton : public juce::Button
+{
+public:
+    enum class Icon { gear, close, none };
+
+    explicit IconButton (Icon iconToDraw) : juce::Button ({}), icon (iconToDraw) {}
+
+    void paintButton (juce::Graphics& g, bool over, bool down) override;
+
+    juce::Colour normalColour { juce::Colours::white };
+    juce::Colour hoverColour  { juce::Colours::white };
+
+private:
+    Icon icon;
+};
+
+//==============================================================================
 /**
- *  Plugin UI. All localised text is supplied by Lang::tr() in applyUiText(),
- *  so the constructor never embeds non-ASCII literals in a juce::String.
+ *  Plugin UI.
  *
- *  Layout uses a fixed 960x600 logical canvas. Everything (painting via an
- *  AffineTransform, widgets via scaledRect(), fonts via ScaledLookAndFeel) is
- *  scaled by one single factor, so resizing can never clip the progress bar or
- *  push controls out of view. The editor also asks the host to keep the 8:5
- *  aspect ratio; if a host forces another ratio, the canvas is centred instead.
- *
- *  The editor never advances time itself: every frame reads the host's
- *  absolute project time and binary-searches the lyrics document.
- *
- *  Three display modes:
- *    · normal      – karaoke stack (current line enlarged, neighbours faded)
- *    · editing     – text editor over the stage
- *    · tap timing  – play the song, click / press Space to stamp each line
+ *  · 两套逻辑画布（横版 960×600 / 竖版 600×900），所有控件按其中的一套排布，
+ *    再统一套一个 AffineTransform，所以缩放、换版型都不会裁切。
+ *  · 窗口比例 50/75/100/125/150/200% 由齿轮设置面板控制，随工程保存。
+ *  · 设置面板与关于面板都画在逻辑画布内，跟着一起缩放。
  */
 class LyricSyncEditor : public juce::AudioProcessorEditor,
                         private juce::Timer,
@@ -67,8 +76,13 @@ public:
     void filesDropped (const juce::StringArray& files, int x, int y) override;
 
 private:
-    static constexpr float baseW = 960.0f;
-    static constexpr float baseH = 600.0f;
+    enum class Orientation { horizontal, vertical };
+
+    static constexpr float hBaseW = 960.0f, hBaseH = 600.0f;
+    static constexpr float vBaseW = 600.0f, vBaseH = 900.0f;
+
+    float baseW() const { return orientation == Orientation::vertical ? vBaseW : hBaseW; }
+    float baseH() const { return orientation == Orientation::vertical ? vBaseH : hBaseH; }
 
     void timerCallback() override;
     void buttonClicked (juce::Button* button) override;
@@ -76,22 +90,27 @@ private:
     void comboBoxChanged (juce::ComboBox* box) override;
 
     //---- Painting -----------------------------------------------------------
-    void paintHeader (juce::Graphics& g, juce::Rectangle<float> area);
+    void paintHeader (juce::Graphics& g);
     void paintStage  (juce::Graphics& g, juce::Rectangle<float> area);
     void paintTapStage (juce::Graphics& g, juce::Rectangle<float> area);
-    void paintFooter (juce::Graphics& g, juce::Rectangle<float> area);
+    void paintSettings (juce::Graphics& g, juce::Rectangle<float> panel);
+    void paintAbout    (juce::Graphics& g, juce::Rectangle<float> panel);
     void drawText    (juce::Graphics& g, juce::Rectangle<float> area,
                       const juce::String& text, float size, juce::Colour colour,
                       bool bold, int sungChars = -1,
                       juce::Colour sungColour = {}, float alpha = 1.0f,
                       juce::Justification just = juce::Justification::centred);
 
-    //---- Scaled layout ------------------------------------------------------
+    //---- Layout -------------------------------------------------------------
     juce::Rectangle<int> scaledRect (float x, float y, float w, float h) const;
+    juce::Rectangle<float> stageArea() const;
+    juce::Rectangle<float> settingsPanelArea() const;
+    juce::Rectangle<float> aboutPanelArea() const;
     void updateScaledFonts();
+    void applyWindowSize();
 
-    /** 进度条使用的时间范围：优先用实测音频长度，测不到时退回歌词时长。 */
-    juce::Range<double> progressRange() const;
+    /** 进度条已去掉，这里只保留"音频长度"读数所需的范围。 */
+    juce::Range<double> audioRange() const;
 
     //---- Interaction --------------------------------------------------------
     void openFileDialog();
@@ -108,18 +127,34 @@ private:
     void exitTapMode();
 
     void resetAudioMeasurement();
-    void setTheme (int index);
+    void setSkin (int index);
     void setLanguage (int next);
+    void setOrientation (Orientation next);
+    void setZoomPercent (int percent);
+    void setFontIndex (int index);
+    void setLyricColour (int index);
+    void pickBackgroundImage();
+    void clearBackgroundImage();
+
+    void showSettings (bool shouldShow);
+    void showAbout (bool shouldShow);
     void applyUiText (bool reloadDemoLyrics);
     void refreshLookAndFeel();
     void syncControlsFromSettings();
-    void updateEditingVisibility();
+    void updateVisibility();
     void updateLabels (double t);
+
+    void saveUiPrefs();
+    void loadUiPrefs();
+    void archiveCurrentLyrics();
 
     juce::String statusText() const;
     juce::String timecodeText (double t) const;
     juce::String barBeatText() const;
     juce::String audioRangeText() const;
+
+    juce::Font uiFont (float size, bool bold = false) const;
+    juce::Colour lyricColour() const;
 
     juce::String tr (Lang::TextId id) const { return Lang::tr (id, language); }
     juce::String sep() const                { return tr (Lang::TextId::separator); }
@@ -130,6 +165,9 @@ private:
     UiPalette palette;
     ScaledLookAndFeel lookAndFeel;
 
+    Orientation orientation = Orientation::horizontal;
+    int zoomPercent = 100;           // 50 / 75 / 100 / 125 / 150 / 200
+
     float uiScale  = 1.0f;
     float originX  = 0.0f;
     float originY  = 0.0f;
@@ -138,17 +176,21 @@ private:
     double displayTime   = 0.0;
     double offsetMs      = 0.0;
     double fontScale     = 1.0;
-    int    themeIndex    = 0;
+    int    skinIndex     = 0;
     int    language      = 0;              // 0 = Chinese, 1 = English
+    int    fontIndex     = 0;
+    int    colourIndex   = 0;
     int    currentIndex  = -2;
     float  transition    = 1.0f;
-    float  displayIndex  = -1.0f;          // 平滑滚动用的连续行号
+    float  displayIndex  = -1.0f;
 
     bool   editing         = false;
     bool   demoMode        = false;
     bool   demoPlaying     = false;
     bool   usingDemoLyrics = true;
-    bool   updatingLanguageBox = false;
+    bool   settingsOpen    = false;
+    bool   aboutOpen       = false;
+    bool   updatingCombos  = false;
     double demoTime        = 0.0;
     double lastTickMs      = 0.0;
 
@@ -157,25 +199,30 @@ private:
     std::vector<juce::String> tapLines;
     std::vector<double>       tapTimes;
     int  tapIndex = 0;
-    juce::String tapOriginalText;
 
-    //---- Audio length persistence ------------------------------------------
+    //---- Audio length -------------------------------------------------------
     double lastAudioSaveMs = 0.0;
     double savedAudioStart = -1.0;
     double savedAudioEnd   = -1.0;
-    double audioTotalSeconds = -1.0;   // KRC 的 [total:]，实测不到时兜底
+    double audioTotalSeconds = -1.0;
 
     juce::uint32 lastTimeUpdates = 0;
     double lastHostUpdateMs      = 0.0;
     juce::String lastWarning;
     juce::String fileDescription;
+    juce::String archivedPath;
 
-    //---- Widgets. Texts are assigned in applyUiText(). ----------------------
+    juce::Image customBg;
+
+    //---- Widgets ------------------------------------------------------------
+    IconButton gearButton  { IconButton::Icon::gear };
+    IconButton logoButton  { IconButton::Icon::none };
+    IconButton closeSettingsButton { IconButton::Icon::close };
+    IconButton closeAboutButton    { IconButton::Icon::close };
+
     juce::TextButton  loadButton;
     juce::TextButton  pasteButton;
     juce::TextButton  demoButton;
-    juce::TextButton  themeButton;
-    juce::ComboBox    languageBox;        // Chinese / English
     juce::TextButton  minusButton;
     juce::TextButton  plusButton       { "+" };
     juce::TextButton  resetButton;
@@ -183,30 +230,26 @@ private:
     juce::TextButton  demoStopButton;
     juce::TextButton  applyTextButton;
     juce::TextButton  cancelTextButton;
-
-    // Tap timing buttons
     juce::TextButton  tapStartButton;
     juce::TextButton  tapUndoButton;
     juce::TextButton  tapFinishButton;
     juce::TextButton  tapExitButton;
+    juce::TextButton  measureButton;
 
-    juce::TextButton  measureButton;      // 重测音频
+    juce::TextButton  demoClockToggle;
 
-    // A toggled TextButton (rather than ToggleButton) so the Chinese label
-    // also goes through getTextButtonFont() and never renders as tofu.
-    juce::TextButton demoClockToggle;
+    // Settings panel widgets
+    juce::ComboBox    languageBox, zoomBox, skinBox, fontBox, colourBox;
+    juce::TextButton  orientHButton, orientVButton;
+    juce::TextButton  pickImageButton, clearImageButton;
 
-    juce::Slider seekSlider  { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
     juce::Slider fontSlider  { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
 
     juce::Label clockLabel, statusLabel, offsetLabel, fileLabel, metaLabel,
                 hintLabel, fontLabel, audioLabel;
     juce::TextEditor editorBox;
 
-    // Hover explanations ("按键旁边出现的中文说明框"). Created at the very end
-    // of the constructor so it never touches a half-built editor.
     std::unique_ptr<juce::TooltipWindow> tooltipWindow;
-
     std::unique_ptr<juce::FileChooser> chooser;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LyricSyncEditor)

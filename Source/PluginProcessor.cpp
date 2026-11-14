@@ -23,6 +23,15 @@ LyricSyncProcessor::LyricSyncProcessor()
     setSetting (Settings::stateVersion, 2);
     setSetting (Settings::audioStart, -1.0);
     setSetting (Settings::audioEnd,   -1.0);
+    setSetting (Settings::audioTotal, -1.0);
+
+    // 界面外观：-1 表示"没设置过"，编辑器会用全局偏好兜底
+    setSetting (Settings::skin,        -1);
+    setSetting (Settings::zoom,        -1);
+    setSetting (Settings::orientation, -1);
+    setSetting (Settings::font,        -1);
+    setSetting (Settings::colour,      -1);
+    setSetting (Settings::customBg,    "");
 
     document.loadText (demoLyricsText (0));
 }
@@ -309,12 +318,26 @@ LyricsInfo LyricSyncProcessor::setLyricsText (const juce::String& text,
 void LyricSyncProcessor::reloadFromSettings (int language)
 {
     juce::String text;
+    juce::String path;
 
     {
         const juce::ScopedLock sl (settingsLock);
-        text = settings.getProperty (Settings::lyricsText,
-                                     demoLyricsText (language)).toString();
+        text = settings.getProperty (Settings::lyricsText, "").toString();
+        path = settings.getProperty (Settings::lyricsPath, "").toString();
     }
+
+    // 工程里没有歌词文本（老工程 / 被清空），但记着本地歌词库的路径：
+    // 直接从歌词库读回来，实现"重开工程自动还原这首歌的歌词"。
+    if (text.trim().isEmpty() && path.isNotEmpty())
+    {
+        const juce::File archived (path);
+
+        if (archived.existsAsFile())
+            text = archived.loadFileAsString();
+    }
+
+    if (text.trim().isEmpty())
+        text = demoLyricsText (language);
 
     document.loadText (text, 4.0, language);
     stateReloadPending.store (false);

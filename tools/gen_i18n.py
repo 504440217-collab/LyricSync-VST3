@@ -128,6 +128,64 @@ TABLE = [
     ("tipSeek",     "播放进度：按音频实际长度显示，可拖动定位",
                     "Playback position: follows the real audio length, drag to seek"),
 
+    #--- 设置面板（右上角齿轮） ---------------------------------------------
+    ("settingsTitle",  "设置", "Settings"),
+    ("setLanguage",    "界面语言", "Language"),
+    ("setZoom",        "窗口比例", "Window size"),
+    ("setLayout",      "窗口布局", "Layout"),
+    ("orientH",        "横版", "Landscape"),
+    ("orientV",        "竖版", "Portrait"),
+    ("setSkin",        "皮肤", "Skin"),
+    ("setFont",        "字体", "Font"),
+    ("setColor",       "歌词颜色", "Lyric colour"),
+    ("setBackground",  "自定义背景", "Background"),
+    ("pickImage",      "选择图片", "Choose image"),
+    ("clearImage",     "清除", "Clear"),
+    ("closeLabel",     "关闭", "Close"),
+
+    ("skinDark",       "深色", "Dark"),
+    ("skinLight",      "浅色", "Light"),
+    ("skinMidnight",   "午夜蓝", "Midnight"),
+    ("skinWarm",       "暖阳", "Warm"),
+    ("skinForest",     "森林", "Forest"),
+    ("skinCustom",     "自定义图片", "Custom image"),
+
+    ("colorAuto",      "跟随皮肤", "Theme"),
+    ("colorWhite",     "白色", "White"),
+    ("colorAmber",     "淡黄", "Amber"),
+    ("colorMint",      "青绿", "Mint"),
+    ("colorSky",       "天蓝", "Sky"),
+    ("colorPink",      "粉色", "Pink"),
+
+    #--- 关于窗口（点左上角 logo） -------------------------------------------
+    ("aboutTitle",     "关于 LyricSync", "About LyricSync"),
+    ("aboutVersion",   "版本", "Version"),
+    ("aboutAuthor",    "创作者", "Author"),
+    ("aboutAuthorValue", "木子 · Muzi Audio Tools", "Muzi · Muzi Audio Tools"),
+    ("aboutDesc",      "在 DAW 里显示与宿主播放头精确同步的歌词\n支持 LRC / 增强 LRC / 酷狗 KRC / SRT / TXT\n任意跳转、循环、倒退都会立即对齐\n卡拉OK 多行歌词 + 点击打轴 + 逐字高亮",
+                       "Lyrics that follow the host playhead exactly\nLRC / enhanced LRC / Kugou KRC / SRT / TXT\nSeeking, looping and rewinding align instantly\nKaraoke stack + tap timing + word highlighting"),
+    ("aboutHint",      "点击任意处关闭", "Click anywhere to close"),
+
+    #--- 歌词存档 -----------------------------------------------------------
+    ("savedToLibrary", "已存档到歌词库", "Saved to lyric library"),
+    ("libraryNote",    "歌词已存入本机歌词库，重新打开工程会自动读取",
+                       "Lyrics are archived locally and reloaded with the project"),
+
+    #--- Tooltips: 设置 / 关于 ----------------------------------------------
+    ("tipGear",     "设置：窗口比例 / 横竖版 / 皮肤 / 字体 / 语言",
+                    "Settings: window size, layout, skin, font, language"),
+    ("tipLogo",     "关于 LyricSync：版本、创作者、功能介绍",
+                    "About LyricSync: version, author, features"),
+    ("tipZoom",     "插件窗口大小（下次打开工程会记住）",
+                    "Plugin window size (remembered for this project)"),
+    ("tipLayout",   "横版 / 竖版布局，控件会跟着重排", "Landscape / portrait layout"),
+    ("tipSkin",     "选择界面皮肤，或用自己的图片做背景", "Pick a skin, or use your own image"),
+    ("tipFont",     "歌词字体", "Lyrics typeface"),
+    ("tipColor",    "歌词文字颜色", "Lyrics text colour"),
+    ("tipPickImage", "上传一张图片作为自定义皮肤背景", "Use your own image as the skin background"),
+    ("tipClearImage", "清除自定义背景图片", "Remove the custom background image"),
+    ("tipClose",    "关闭设置", "Close settings"),
+
     # Parser warnings (used by LyricsDocument)
     ("warnNoTimestamps1", "未检测到时间戳，已按每句 ",
                           "No timestamps found; arranged at "),
