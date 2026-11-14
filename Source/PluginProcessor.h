@@ -24,6 +24,8 @@ namespace Settings
     // 从轨道实际音频测得的范围（秒，工程时间）。-1 表示尚未测到。
     inline const juce::Identifier audioStart { "audioStart" };
     inline const juce::Identifier audioEnd   { "audioEnd" };
+    // 歌词文件自带的音频总长（KRC 的 [total:]）。实测不到时用它兜底。
+    inline const juce::Identifier audioTotal { "audioTotal" };
 }
 
 //==============================================================================

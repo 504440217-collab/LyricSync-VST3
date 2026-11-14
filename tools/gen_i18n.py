@@ -44,13 +44,13 @@ TABLE = [
     ("playSymbol",       ">", ">"),
     ("stopSymbol",       "[]", "[]"),
 
-    ("hint",             "提示：歌词跟随宿主播放头 | 任意跳转 / 循环 / 倒退都会立即对齐 | 支持拖入 .lrc / .srt / .txt",
-                         "Tip: lyrics follow the host playhead | seeking, looping and rewinding align instantly | drop .lrc / .srt / .txt"),
+    ("hint",             "提示：歌词跟随宿主播放头 | 任意跳转 / 循环 / 倒退都会立即对齐 | 支持 .lrc / .krc / .srt / .txt",
+                         "Tip: lyrics follow the host playhead | seeking, looping and rewinding align instantly | .lrc / .krc / .srt / .txt"),
     ("demoFileDesc",     "示例歌词  |  拖入文件即可替换",
                          "Demo lyrics  |  drop a file to replace"),
     ("savedFileDesc",    "宿主工程中保存的歌词", "Lyrics saved in host project"),
-    ("emptyStage",       "把 .lrc / .srt / .txt 拖进窗口\n或点击左下角的 载入歌词 按钮",
-                         "Drop a .lrc / .srt / .txt file here\nor click Load Lyrics below"),
+    ("emptyStage",       "把 .lrc / .krc / .srt / .txt 拖进窗口\n或点击左下角的 载入歌词 按钮",
+                         "Drop a .lrc / .krc / .srt / .txt file here\nor click Load Lyrics below"),
     ("intro",            "前奏", "Intro"),
     ("nextLineIn",       "下一句还有 ", "Next line in "),
     ("secondsSuffix",    " 秒", " s"),
@@ -100,7 +100,11 @@ TABLE = [
                          "Audio length measured - the progress bar now follows this song"),
 
     #--- Tooltips -----------------------------------------------------------
-    ("tipLoad",     "载入 .lrc / .srt / .txt 歌词文件", "Load a .lrc / .srt / .txt lyrics file"),
+    #--- KRC (酷狗逐字歌词) ---------------------------------------------------
+    ("krcFormat",    "KRC 酷狗逐字", "KRC (Kugou)"),
+    ("krcLoaded",    "KRC 已转成逐字歌词；若整体偏移请用 - / + 微调",
+                     "KRC converted to word-timed lyrics; use -/+ to nudge the offset"),
+    ("tipLoad",     "载入 .lrc / .krc / .srt / .txt 歌词文件", "Load a .lrc / .krc / .srt / .txt lyrics file"),
     ("tipPaste",    "粘贴或直接编辑歌词文本", "Paste or edit the lyrics text"),
     ("tipDemo",     "载入内置示例歌词", "Load the built-in demo lyrics"),
     ("tipTheme",    "切换深色 / 浅色界面", "Switch dark / light theme"),

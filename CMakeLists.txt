@@ -51,6 +51,7 @@ target_sources(LyricSync
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
         Source/LyricsDocument.cpp
+        Source/KrcLyrics.cpp
         Source/I18n.cpp)
 
 target_compile_definitions(LyricSync

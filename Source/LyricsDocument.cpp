@@ -409,6 +409,7 @@ LyricsInfo LyricsDocument::loadText (const juce::String& rawText, double fallbac
                       [] (const LyricLine& a, const LyricLine& b) { return a.time < b.time; });
 
     // 同一时间戳连续两行视为「原文 + 译文」
+    // （原文可以是逐字行：KRC 的翻译就是挂在逐字行下面的，所以不排除 hasKaraoke）
     for (size_t i = 1; i < lines.size();)
     {
         auto& prev = lines[i - 1];
@@ -416,7 +417,7 @@ LyricsInfo LyricsDocument::loadText (const juce::String& rawText, double fallbac
 
         if (std::abs (cur.time - prev.time) < 0.004
             && prev.translation.isEmpty()
-            && ! prev.hasKaraoke() && ! cur.hasKaraoke()
+            && ! cur.hasKaraoke()
             && cur.text != prev.text)
         {
             prev.translation = cur.text;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PluginProcessor.h"
+#include "KrcLyrics.h"
 #include "UiPalette.h"
 #include "I18n.h"
 
@@ -162,6 +163,7 @@ private:
     double lastAudioSaveMs = 0.0;
     double savedAudioStart = -1.0;
     double savedAudioEnd   = -1.0;
+    double audioTotalSeconds = -1.0;   // KRC 的 [total:]，实测不到时兜底
 
     juce::uint32 lastTimeUpdates = 0;
     double lastHostUpdateMs      = 0.0;

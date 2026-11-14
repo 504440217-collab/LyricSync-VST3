@@ -68,6 +68,8 @@ namespace Lang
         audioUnknown,
         measureAudio,
         audioMeasured,
+        krcFormat,
+        krcLoaded,
         tipLoad,
         tipPaste,
         tipDemo,

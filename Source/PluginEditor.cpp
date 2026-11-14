@@ -50,10 +50,9 @@ namespace
     }
 
     /** Many Chinese LRC files are GBK encoded: accept UTF-8 / UTF-16 / GB18030. */
-    juce::String decodeLyricsFile (const juce::File& file)
+    juce::String decodeTextFile (const juce::MemoryBlock& data)
     {
-        juce::MemoryBlock data;
-        if (! file.loadFileAsData (data) || data.getSize() == 0)
+        if (data.getSize() == 0)
             return {};
 
         auto* bytes = static_cast<const char*> (data.getData());
@@ -93,8 +92,9 @@ namespace
     bool looksLikeLyricsFile (const juce::String& path)
     {
         auto p = path.toLowerCase();
-        return p.endsWith (".lrc") || p.endsWith (".txt") || p.endsWith (".srt")
-            || p.endsWith (".vtt") || p.endsWith (".ass") || p.endsWith (".ssa");
+        return p.endsWith (".lrc") || p.endsWith (".krc") || p.endsWith (".txt")
+            || p.endsWith (".srt") || p.endsWith (".vtt") || p.endsWith (".ass")
+            || p.endsWith (".ssa");
     }
 
     /** Remove [mm:ss.xx] / <mm:ss.xx> stamps, keeping only the lyric text. */
@@ -294,6 +294,8 @@ void LyricSyncEditor::syncControlsFromSettings()
         savedAudioStart = s;
         savedAudioEnd   = e;
     }
+
+    audioTotalSeconds = static_cast<double> (processor.getSetting (Settings::audioTotal, -1.0));
 
     palette = UiPalette::fromIndex (themeIndex);
     fontSlider.setValue (fontScale, juce::dontSendNotification);
@@ -566,6 +568,10 @@ juce::Range<double> LyricSyncEditor::progressRange() const
 
     if (s >= 0.0 && e > s + 1.0)
         return { s, e };
+
+    // 还没播过这首歌：KRC 文件自带 [total:]，先按它显示
+    if (audioTotalSeconds > 1.0)
+        return { 0.0, audioTotalSeconds };
 
     return { 0.0, juce::jmax (5.0, processor.lyrics().totalDuration()) };
 }
@@ -1207,7 +1213,7 @@ void LyricSyncEditor::openFileDialog()
     chooser = std::make_unique<juce::FileChooser> (
         tr (Lang::TextId::fileChooserTitle),
         juce::File::getSpecialLocation (juce::File::userHomeDirectory),
-        "*.lrc;*.txt;*.srt;*.vtt");
+        "*.lrc;*.krc;*.txt;*.srt;*.vtt");
 
     const int flags = juce::FileBrowserComponent::openMode
                     | juce::FileBrowserComponent::canSelectFiles;
@@ -1222,7 +1228,34 @@ void LyricSyncEditor::openFileDialog()
 
 void LyricSyncEditor::loadLyricsFile (const juce::File& file)
 {
-    const auto text = decodeLyricsFile (file);
+    juce::MemoryBlock data;
+    const bool loaded = file.loadFileAsData (data);
+
+    juce::String text;
+    bool isKrc = false;
+    double krcTotal = -1.0;
+
+    if (loaded && Krc::isKrcData (data.getData(), static_cast<int> (data.getSize())))
+    {
+        // 酷狗 KRC：解密 + 解压 + 转成插件内部的增强 LRC（逐字锚点）。
+        const auto plain = Krc::decrypt (data);
+        text = Krc::toEnhancedLrc (plain);
+        krcTotal = Krc::totalSecondsFromPlain (plain);
+        isKrc = true;
+
+        if (text.isEmpty())
+        {
+            fileDescription = tr (Lang::TextId::readFailed) + file.getFileName();
+            lastWarning = tr (Lang::TextId::emptyFile);
+            usingDemoLyrics = false;
+            repaint();
+            return;
+        }
+    }
+    else if (loaded)
+    {
+        text = decodeTextFile (data);
+    }
 
     if (text.isEmpty())
     {
@@ -1238,13 +1271,18 @@ void LyricSyncEditor::loadLyricsFile (const juce::File& file)
     processor.setSetting (Settings::offsetMs, 0.0);
     processor.setSetting (Settings::lyricsPath, file.getFullPathName());
 
-    fileDescription = file.getFileName() + sep() + info.formatName
+    // KRC 自带 [total:]，可以当进度条的兜底长度
+    audioTotalSeconds = isKrc ? krcTotal : -1.0;
+    processor.setSetting (Settings::audioTotal, audioTotalSeconds);
+
+    fileDescription = file.getFileName() + sep()
+                    + (isKrc ? tr (Lang::TextId::krcFormat) : info.formatName)
                     + sep() + juce::String (info.lineCount)
                     + tr (Lang::TextId::lineCountSuffix);
     if (info.karaokeLines > 0)
         fileDescription += tr (Lang::TextId::karaokeSuffix);
 
-    lastWarning = info.warning;
+    lastWarning = isKrc ? tr (Lang::TextId::krcLoaded) : info.warning;
     usingDemoLyrics = false;
     currentIndex = -2;
     displayIndex = -1.0f;
@@ -1264,6 +1302,10 @@ void LyricSyncEditor::loadLyricsText (const juce::String& text,
     offsetMs = 0.0;
     processor.setSetting (Settings::offsetMs, 0.0);
     processor.setSetting (Settings::lyricsPath, "");
+
+    // 手输 / 示例 / 打轴的歌词没有 [total:]，清掉旧的 KRC 长度
+    audioTotalSeconds = -1.0;
+    processor.setSetting (Settings::audioTotal, -1.0);
 
     fileDescription = label + sep() + info.formatName
                     + sep() + juce::String (info.lineCount)
