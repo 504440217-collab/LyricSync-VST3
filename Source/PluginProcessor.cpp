@@ -2,6 +2,8 @@
 #include "PluginEditor.h"
 #include "DemoLyrics.h"
 
+#include <cmath>
+
 //==============================================================================
 LyricSyncProcessor::LyricSyncProcessor()
     : AudioProcessor (BusesProperties()
@@ -19,6 +21,8 @@ LyricSyncProcessor::LyricSyncProcessor()
     setSetting (Settings::demoClock,  false);
     setSetting (Settings::language,   0);
     setSetting (Settings::stateVersion, 2);
+    setSetting (Settings::audioStart, -1.0);
+    setSetting (Settings::audioEnd,   -1.0);
 
     document.loadText (demoLyricsText (0));
 }
@@ -54,15 +58,90 @@ bool LyricSyncProcessor::isBusesLayoutSupported (const BusesLayout& layouts) con
 void LyricSyncProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     // 音频直通：一个采样都不动，宿主给什么就还什么。
-    juce::ignoreUnused (buffer, midi);
+    juce::ignoreUnused (midi);
     readHostTime();
+    updateAudioRange (buffer);
 }
 
 void LyricSyncProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     // 即使宿主把插件旁路，也要继续读取播放头，歌词才不会停住。
-    juce::ignoreUnused (buffer, midi);
+    juce::ignoreUnused (midi);
     readHostTime();
+    updateAudioRange (buffer);
+}
+
+//------------------------------------------------------------------------------
+/**
+ *  音频长度测量。
+ *
+ *  VST3 效果器拿不到"片段长度"这种信息，但它能拿到经过本轨的真实音频。
+ *  所以这里用最朴素也最可靠的办法：找出非静音区间的第一个和最后一个块，
+ *  把它们换算成工程时间，作为这首歌的起点/终点。
+ *
+ *  音频线程纪律：只做峰值扫描 + 原子 CAS，不加锁、不分配内存。
+ */
+void LyricSyncProcessor::updateAudioRange (const juce::AudioBuffer<float>& buffer)
+{
+    const int numSamples = buffer.getNumSamples();
+    if (numSamples <= 0)
+        return;
+
+    float peak = 0.0f;
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        peak = juce::jmax (peak, buffer.getMagnitude (ch, 0, numSamples));
+
+    if (peak < 0.0005f)          // -66 dBFS 以下当作静音（空白小节 / 未播放）
+        return;
+
+    const double sr = hostSampleRate.load();
+    if (sr <= 0.0)
+        return;
+
+    const double blockStart = positionSeconds.load();
+    if (! std::isfinite (blockStart) || blockStart < 0.0)
+        return;
+
+    const double blockEnd = blockStart + static_cast<double> (numSamples) / sr;
+
+    // 只在真正播放时测量，避免某些宿主在停止状态下仍输出残留 buffer
+    if (! isPlaying.load() && blockStart <= 0.0)
+        return;
+
+    double curStart = audioStartSeconds.load (std::memory_order_relaxed);
+    while ((curStart < 0.0 || blockStart < curStart)
+           && ! audioStartSeconds.compare_exchange_weak (curStart, blockStart,
+                                                         std::memory_order_relaxed))
+    {
+    }
+
+    double curEnd = audioEndSeconds.load (std::memory_order_relaxed);
+    while (blockEnd > curEnd
+           && ! audioEndSeconds.compare_exchange_weak (curEnd, blockEnd,
+                                                       std::memory_order_relaxed))
+    {
+    }
+}
+
+void LyricSyncProcessor::resetAudioRange()
+{
+    audioStartSeconds.store (-1.0);
+    audioEndSeconds.store (-1.0);
+}
+
+void LyricSyncProcessor::storeAudioRange (double startSeconds, double endSeconds)
+{
+    {
+        const juce::ScopedLock sl (settingsLock);
+        settings.setProperty (Settings::audioStart, startSeconds, nullptr);
+        settings.setProperty (Settings::audioEnd,   endSeconds,   nullptr);
+    }
+
+    if (startSeconds >= 0.0)
+        audioStartSeconds.store (startSeconds);
+
+    if (endSeconds > 0.0)
+        audioEndSeconds.store (endSeconds);
 }
 
 //------------------------------------------------------------------------------
@@ -153,6 +232,9 @@ void LyricSyncProcessor::getStateInformation (juce::MemoryBlock& destData)
     juce::String xml;
     {
         const juce::ScopedLock sl (settingsLock);
+        // 把当前测到的音频范围一并写进工程，重新打开时进度条不会跳回 0。
+        settings.setProperty (Settings::audioStart, audioStartSeconds.load(), nullptr);
+        settings.setProperty (Settings::audioEnd,   audioEndSeconds.load(),   nullptr);
         xml = settings.toXmlString();
     }
 
@@ -197,6 +279,12 @@ void LyricSyncProcessor::setStateInformation (const void* data, int sizeInBytes)
 
             // 歌词文档只在 GUI 线程解析，编辑器检测到这个标记后自行重载。
             stateReloadPending.store (true);
+
+            // 恢复上次测量的音频范围（进度条需要它）
+            const double savedStart = static_cast<double> (loaded.getProperty (Settings::audioStart, -1.0));
+            const double savedEnd   = static_cast<double> (loaded.getProperty (Settings::audioEnd,   -1.0));
+            audioStartSeconds.store (savedStart);
+            audioEndSeconds.store (savedEnd);
         }
     }
 }

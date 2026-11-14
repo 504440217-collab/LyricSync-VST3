@@ -5,3 +5,4 @@ third_party/
 *.suo
 .DS_Store
 Thumbs.db
+download/

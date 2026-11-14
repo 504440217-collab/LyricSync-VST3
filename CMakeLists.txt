@@ -41,7 +41,8 @@ juce_add_plugin(LyricSync
     NEEDS_MIDI_INPUT              FALSE
     NEEDS_MIDI_OUTPUT             FALSE
     IS_MIDI_EFFECT                FALSE
-    EDITOR_WANTS_KEYBOARD_FOCUS   FALSE
+    # 打轴功能需要在插件窗口里接收空格键，所以要向宿主申请键盘焦点
+    EDITOR_WANTS_KEYBOARD_FOCUS   TRUE
     COPY_PLUGIN_AFTER_BUILD       FALSE
     VST3_CATEGORIES               Fx)
 

@@ -21,6 +21,9 @@ namespace Settings
     inline const juce::Identifier demoClock  { "demoClock" };
     inline const juce::Identifier language  { "language" };   // 0 = 中文, 1 = English
     inline const juce::Identifier stateVersion { "stateVersion" };
+    // 从轨道实际音频测得的范围（秒，工程时间）。-1 表示尚未测到。
+    inline const juce::Identifier audioStart { "audioStart" };
+    inline const juce::Identifier audioEnd   { "audioEnd" };
 }
 
 //==============================================================================
@@ -81,6 +84,19 @@ public:
     std::atomic<bool>        hasHostTime    { false };
     std::atomic<juce::uint32> timeUpdates  { 0 };
 
+    //---- 音频长度测量（音频线程写，GUI 线程读） ------------------------------
+    //  插件作为插入效果收到的是这条轨道（或总线）的真实音频，因此可以在
+    //  音频线程里用"非静音区间"的起点/终点还原歌曲的实际长度：
+    //  进度条按它显示，而不是按工程总长度或歌词文件的最后一句。
+    std::atomic<double> audioStartSeconds { -1.0 };
+    std::atomic<double> audioEndSeconds   { -1.0 };
+
+    /** 清空测量结果（换歌、或用户点击"重测音频"时调用）。 */
+    void resetAudioRange();
+
+    /** 由编辑器把测量结果写回工程状态 / 或在载入工程后恢复。 */
+    void storeAudioRange (double startSeconds, double endSeconds);
+
     //---- 歌词与设置（GUI 线程访问） -----------------------------------------
     LyricsDocument&       lyrics()       noexcept { return document; }
     const LyricsDocument& lyrics() const noexcept { return document; }
@@ -107,6 +123,7 @@ private:
     std::atomic<bool> stateReloadPending { false };
 
     void readHostTime();
+    void updateAudioRange (const juce::AudioBuffer<float>& buffer);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LyricSyncProcessor)
 };

@@ -6,6 +6,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <vector>
+
 //==============================================================================
 /**
  *  LookAndFeel that keeps EVERY widget on the same Chinese-capable typeface and
@@ -37,6 +39,11 @@ public:
  *
  *  The editor never advances time itself: every frame reads the host's
  *  absolute project time and binary-searches the lyrics document.
+ *
+ *  Three display modes:
+ *    · normal      – karaoke stack (current line enlarged, neighbours faded)
+ *    · editing     – text editor over the stage
+ *    · tap timing  – play the song, click / press Space to stamp each line
  */
 class LyricSyncEditor : public juce::AudioProcessorEditor,
                         private juce::Timer,
@@ -51,6 +58,9 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
+
+    void mouseDown (const juce::MouseEvent& e) override;
+    bool keyPressed (const juce::KeyPress& key) override;
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int x, int y) override;
@@ -67,15 +77,20 @@ private:
     //---- Painting -----------------------------------------------------------
     void paintHeader (juce::Graphics& g, juce::Rectangle<float> area);
     void paintStage  (juce::Graphics& g, juce::Rectangle<float> area);
+    void paintTapStage (juce::Graphics& g, juce::Rectangle<float> area);
     void paintFooter (juce::Graphics& g, juce::Rectangle<float> area);
     void drawText    (juce::Graphics& g, juce::Rectangle<float> area,
                       const juce::String& text, float size, juce::Colour colour,
                       bool bold, int sungChars = -1,
-                      juce::Colour sungColour = {}, float alpha = 1.0f);
+                      juce::Colour sungColour = {}, float alpha = 1.0f,
+                      juce::Justification just = juce::Justification::centred);
 
     //---- Scaled layout ------------------------------------------------------
     juce::Rectangle<int> scaledRect (float x, float y, float w, float h) const;
     void updateScaledFonts();
+
+    /** 进度条使用的时间范围：优先用实测音频长度，测不到时退回歌词时长。 */
+    juce::Range<double> progressRange() const;
 
     //---- Interaction --------------------------------------------------------
     void openFileDialog();
@@ -84,6 +99,14 @@ private:
                          bool isDemo = false);
     void enterEditMode();
     void leaveEditMode (bool apply);
+
+    void enterTapMode();
+    void stampTap();
+    void undoStamp();
+    void finishTapMode();
+    void exitTapMode();
+
+    void resetAudioMeasurement();
     void setTheme (int index);
     void setLanguage (int next);
     void applyUiText (bool reloadDemoLyrics);
@@ -95,6 +118,7 @@ private:
     juce::String statusText() const;
     juce::String timecodeText (double t) const;
     juce::String barBeatText() const;
+    juce::String audioRangeText() const;
 
     juce::String tr (Lang::TextId id) const { return Lang::tr (id, language); }
     juce::String sep() const                { return tr (Lang::TextId::separator); }
@@ -117,6 +141,7 @@ private:
     int    language      = 0;              // 0 = Chinese, 1 = English
     int    currentIndex  = -2;
     float  transition    = 1.0f;
+    float  displayIndex  = -1.0f;          // 平滑滚动用的连续行号
 
     bool   editing         = false;
     bool   demoMode        = false;
@@ -125,6 +150,18 @@ private:
     bool   updatingLanguageBox = false;
     double demoTime        = 0.0;
     double lastTickMs      = 0.0;
+
+    //---- Tap timing ---------------------------------------------------------
+    bool tapMode = false;
+    std::vector<juce::String> tapLines;
+    std::vector<double>       tapTimes;
+    int  tapIndex = 0;
+    juce::String tapOriginalText;
+
+    //---- Audio length persistence ------------------------------------------
+    double lastAudioSaveMs = 0.0;
+    double savedAudioStart = -1.0;
+    double savedAudioEnd   = -1.0;
 
     juce::uint32 lastTimeUpdates = 0;
     double lastHostUpdateMs      = 0.0;
@@ -145,6 +182,14 @@ private:
     juce::TextButton  applyTextButton;
     juce::TextButton  cancelTextButton;
 
+    // Tap timing buttons
+    juce::TextButton  tapStartButton;
+    juce::TextButton  tapUndoButton;
+    juce::TextButton  tapFinishButton;
+    juce::TextButton  tapExitButton;
+
+    juce::TextButton  measureButton;      // 重测音频
+
     // A toggled TextButton (rather than ToggleButton) so the Chinese label
     // also goes through getTextButtonFont() and never renders as tofu.
     juce::TextButton demoClockToggle;
@@ -152,8 +197,13 @@ private:
     juce::Slider seekSlider  { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
     juce::Slider fontSlider  { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
 
-    juce::Label clockLabel, statusLabel, offsetLabel, fileLabel, metaLabel, hintLabel, fontLabel;
+    juce::Label clockLabel, statusLabel, offsetLabel, fileLabel, metaLabel,
+                hintLabel, fontLabel, audioLabel;
     juce::TextEditor editorBox;
+
+    // Hover explanations ("按键旁边出现的中文说明框"). Created at the very end
+    // of the constructor so it never touches a half-built editor.
+    std::unique_ptr<juce::TooltipWindow> tooltipWindow;
 
     std::unique_ptr<juce::FileChooser> chooser;
 
