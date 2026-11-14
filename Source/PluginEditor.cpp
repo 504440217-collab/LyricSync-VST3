@@ -1650,9 +1650,12 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
 
     const float cx = mainX;
     const float cw = mainW;
-    const float centreY = area.getCentreY() - 8.0f;
 
-    if (tapIndex > 0 && tapIndex - 1 < total)
+    // 竖版把列表放在上方，主内容顺着列表往下排；横版仍然左右分栏
+    const float listBottom = rows.empty() ? area.getY() + 48.0f : rows.back().getBottom();
+    const float centreY = v ? listBottom + 74.0f : area.getCentreY() - 8.0f;
+
+    if (! v && tapIndex > 0 && tapIndex - 1 < total)
     {
         drawText (g, juce::Rectangle<float> (cx, centreY - 96.0f, cw, 20.0f),
                   tr (Lang::TextId::tapPrev) + "  "
@@ -1727,18 +1730,18 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
     }
 
     //---- 底部提示 -------------------------------------------------------
-    drawText (g, juce::Rectangle<float> (cx, area.getBottom() - 92.0f, cw, 20.0f),
-              tr (Lang::TextId::tapHint), 11.5f * widthScale, palette.dim, false);
+    drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 66.0f : 92.0f), cw, 20.0f),
+              tr (Lang::TextId::tapHint), 11.0f * widthScale, palette.dim, false);
 
-    drawText (g, juce::Rectangle<float> (cx, area.getBottom() - 68.0f, cw, 26.0f),
+    drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 44.0f : 68.0f), cw, 24.0f),
               tr (Lang::TextId::tapWillStamp) + "  " + formatTimecode (displayTime),
-              16.0f * widthScale, palette.accent, true);
+              (v ? 14.0f : 16.0f) * widthScale, palette.accent, true);
 
     const bool paused = tapMode && demoMode && ! demoPlaying;
 
-    drawText (g, juce::Rectangle<float> (cx, area.getBottom() - 38.0f, cw, 18.0f),
+    drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 22.0f : 38.0f), cw, 18.0f),
               paused ? tr (Lang::TextId::tapPausedWarn) : tr (Lang::TextId::tapSpaceWarn),
-              10.5f * widthScale, paused ? palette.warn : palette.faint, false);
+              10.0f * widthScale, paused ? palette.warn : palette.faint, false);
 }
 
 //==============================================================================
@@ -2981,7 +2984,7 @@ std::vector<juce::Rectangle<float>> LyricSyncEditor::tapListRows (juce::Rectangl
     {
         if (v)
         {
-            const float y = area.getBottom() - 62.0f - static_cast<float> (n - i) * rowH;
+            const float y = area.getY() + 56.0f + static_cast<float> (i) * rowH;
             rows.push_back ({ area.getX() + 30.0f, y, area.getWidth() - 60.0f, rowH - 2.0f });
         }
         else
