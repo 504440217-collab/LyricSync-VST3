@@ -185,6 +185,8 @@ private:
     void closeTapRowEditing();             // 取消编辑
     double parseTimecode (const juce::String& text) const;
     std::vector<juce::Rectangle<float>> tapListRows (juce::Rectangle<float> area) const;
+    std::vector<int> tapListIndices() const;      // 已记录行的行号（与 tapListRows 一一对应）
+    void showEditorMenu (juce::TextEditor& te);   // 右键菜单（跟随中英文）
     void finishTapMode();
     void exitTapMode();
 

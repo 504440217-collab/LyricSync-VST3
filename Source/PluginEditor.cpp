@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.7.2";
+    const char* const kVersion = "1.7.3";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -499,6 +499,8 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
         ed->setJustification (juce::Justification::centredLeft);
         ed->onReturnKey = [this] { applyTapRow(); };
         ed->onEscapeKey = [this] { closeTapRowEditing(); };
+        ed->setPopupMenuEnabled (false);          // 自带菜单是英文，自己画
+        ed->addMouseListener (this, false);
         addChildComponent (*ed);
     }
 
@@ -509,7 +511,8 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     editorBox.setReturnKeyStartsNewLine (true);
     editorBox.setScrollbarsShown (true);
     editorBox.setFont (uiFont (14.0f));
-    editorBox.setPopupMenuEnabled (true);
+    editorBox.setPopupMenuEnabled (false);        // 自带菜单是英文，自己画
+    editorBox.addMouseListener (this, false);
     addChildComponent (editorBox);
 
     // 工程里存的是不是内置示例？只有"没存过"或"正好是示例"才用当前语言重载，
@@ -1786,7 +1789,7 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
     //---- 已记录列表（可点，点一行就从那一句重打）-------------------------
     if (hasList)
     {
-        const int first = tapIndex - static_cast<int> (rows.size());
+        const auto ids = tapListIndices();
 
         drawText (g, juce::Rectangle<float> (rows[0].getX(), rows[0].getY() - 20.0f,
                                              rows[0].getWidth(), 16.0f),
@@ -1797,7 +1800,7 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
         for (int i = 0; i < static_cast<int> (rows.size()); ++i)
         {
             const auto r  = rows[(size_t) i];
-            const int  li = first + i;
+            const int  li = ids[(size_t) i];
 
             g.setColour (palette.text.withAlpha (0.05f));
             g.fillRoundedRectangle (r, 5.0f);
@@ -2372,6 +2375,20 @@ void LyricSyncEditor::sliderValueChanged (juce::Slider* slider)
 //==============================================================================
 void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 {
+    // 文本框右键：显示跟随语言的菜单
+    {
+        juce::TextEditor* te = (e.eventComponent == &editorBox)  ? &editorBox
+                             : (e.eventComponent == &tapTextEditor) ? &tapTextEditor
+                             : (e.eventComponent == &tapTimeEditor) ? &tapTimeEditor
+                             : nullptr;
+
+        if (te != nullptr && e.mods.isPopupMenu())
+        {
+            showEditorMenu (*te);
+            return;
+        }
+    }
+
     // 点左下角提示词：换下一条（不打断任何其它交互）
     if (e.eventComponent == &hintLabel)
     {
@@ -2410,14 +2427,14 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 
         // 点「已记录」里的某一行：打开这一行的编辑器
         const auto rows = tapListRows (stageArea());
-        const int  first = tapIndex - static_cast<int> (rows.size());
+        const auto ids  = tapListIndices();
         const auto p = toLogical (e.position);
 
         for (int i = 0; i < static_cast<int> (rows.size()); ++i)
         {
             if (rows[(size_t) i].contains (p))
             {
-                editTapRow (first + i);
+                editTapRow (ids[(size_t) i]);
                 return;
             }
         }
@@ -2940,14 +2957,46 @@ void LyricSyncEditor::enterTapMode()
     const auto source = editing ? editorBox.getText()
                                 : processor.getSetting (Settings::lyricsText, "").toString();
 
+    // 行首的 [mm:ss.xx] / [mm:ss:xx] → 秒
+    const auto parseLeadingStamp = [] (const juce::String& raw) -> double
+    {
+        auto s = raw.trimStart();
+
+        if (! s.startsWithChar ('['))
+            return -1.0;
+
+        const int close = s.indexOfChar (']');
+
+        if (close <= 1)
+            return -1.0;
+
+        auto head = s.substring (1, close).trim();
+
+        if (! head.containsChar (':'))
+            return -1.0;
+
+        const int c1 = head.indexOfChar (':');
+        const int mins = head.substring (0, c1).getIntValue();
+        const double secs = head.substring (c1 + 1).replaceCharacter (':', '.').getDoubleValue();
+
+        if (mins < 0 || secs < 0.0)
+            return -1.0;
+
+        return static_cast<double> (mins) * 60.0 + secs;
+    };
+
     std::vector<juce::String> plain;
+    std::vector<double>       times;
 
     for (const auto& raw : juce::StringArray::fromLines (source))
     {
         auto t = stripTimeTags (raw).trim();
 
-        if (t.isNotEmpty())
-            plain.push_back (t);
+        if (t.isEmpty())
+            continue;
+
+        plain.push_back (t);
+        times.push_back (parseLeadingStamp (raw));
     }
 
     if (plain.empty())
@@ -2958,9 +3007,20 @@ void LyricSyncEditor::enterTapMode()
     }
 
     tapLines = std::move (plain);
-    tapTimes.assign (tapLines.size(), -1.0);
-    tapIndex = 0;
+    tapTimes = std::move (times);
     tapEditIndex = -1;
+
+    // 已经打过轴的行保留时间，指针停到第一个还没打点的句子
+    {
+        int firstMissing = 0;
+
+        while (firstMissing < static_cast<int> (tapTimes.size())
+               && tapTimes[(size_t) firstMissing] >= 0.0)
+            ++firstMissing;
+
+        tapIndex = firstMissing;
+    }
+
     tapMode = true;
     editing = false;
     editorBox.setVisible (false);
@@ -2968,8 +3028,13 @@ void LyricSyncEditor::enterTapMode()
 
     if (demoMode)
     {
-        demoTime = audioRange().getStart();
-        demoPlaying = true;
+        const auto range = audioRange();
+
+        demoTime = (tapIndex > 0 && tapTimes[(size_t) (tapIndex - 1)] >= 0.0)
+                     ? juce::jlimit (range.getStart(), range.getEnd(), tapTimes[(size_t) (tapIndex - 1)])
+                     : range.getStart();
+
+        demoPlaying = tapIndex < static_cast<int> (tapLines.size());
     }
 
     updateVisibility();
@@ -3272,18 +3337,75 @@ void LyricSyncEditor::toggleTapPause()
     repaint();
 }
 
+
+//==============================================================================
+void LyricSyncEditor::showEditorMenu (juce::TextEditor& te)
+{
+    const bool hasSel = te.getHighlightedRegion().getLength() > 0;
+
+    juce::PopupMenu m;
+    m.setLookAndFeel (&lookAndFeel);
+
+    m.addItem (1, tr (Lang::TextId::menuCut),    hasSel);
+    m.addItem (2, tr (Lang::TextId::menuCopy),   hasSel);
+    m.addItem (3, tr (Lang::TextId::menuPaste));
+    m.addItem (4, tr (Lang::TextId::menuDelete), hasSel);
+    m.addSeparator();
+    m.addItem (5, tr (Lang::TextId::menuSelectAll));
+
+    juce::Component::SafePointer<juce::TextEditor> target (&te);
+
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&te),
+                     [target] (int result)
+    {
+        if (target == nullptr || result == 0)
+            return;
+
+        switch (result)
+        {
+            case 1: target->cut();     break;
+            case 2: target->copy();    break;
+            case 3: target->paste();   break;
+            case 4: target->insertTextAtCaret (juce::String()); break;   // 删除选区
+            case 5: target->selectAll(); break;
+            default: break;
+        }
+    });
+}
+
+//==============================================================================
+std::vector<int> LyricSyncEditor::tapListIndices() const
+{
+    std::vector<int> ids;
+
+    if (! tapMode)
+        return ids;
+
+    const bool v = (orientation == Orientation::vertical);
+    const int  maxRows = v ? 4 : 7;
+
+    for (int i = 0; i < static_cast<int> (tapTimes.size()); ++i)
+        if (tapTimes[(size_t) i] >= 0.0)
+            ids.push_back (i);
+
+    if (static_cast<int> (ids.size()) > maxRows)
+        ids.erase (ids.begin(), ids.begin() + (static_cast<int> (ids.size()) - maxRows));
+
+    return ids;
+}
+
 std::vector<juce::Rectangle<float>> LyricSyncEditor::tapListRows (juce::Rectangle<float> area) const
 {
     std::vector<juce::Rectangle<float>> rows;
 
-    if (! tapMode || tapIndex <= 0)
+    const auto ids = tapListIndices();
+    const int  n   = static_cast<int> (ids.size());
+
+    if (n <= 0)
         return rows;
 
-    const bool  v       = (orientation == Orientation::vertical);
-    const int   maxRows = v ? 4 : 7;
-    const int   first   = juce::jmax (0, tapIndex - maxRows);
-    const int   n       = tapIndex - first;
-    const float rowH    = v ? 24.0f : 27.0f;
+    const bool  v    = (orientation == Orientation::vertical);
+    const float rowH = v ? 24.0f : 27.0f;
 
     for (int i = 0; i < n; ++i)
     {
