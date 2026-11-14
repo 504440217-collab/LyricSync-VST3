@@ -1706,7 +1706,7 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
             g.setColour (palette.text.withAlpha (0.10f));
             g.drawRoundedRectangle (r, 5.0f, 1.0f);
 
-            const auto ri = r.toNearestInt();
+            auto ri = r.toNearestInt();
 
             g.setColour (palette.faint);
             g.setFont (uiFont (9.5f));
