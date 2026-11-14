@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.6.2";
+    const char* const kVersion = "1.6.3";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -1479,13 +1479,24 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
                     smoothedSung = -1.0f;
                 }
 
-                const float fade   = 0.55f + 0.45f * transition;
-                // 颜色也渐变过来，而不是"啪"一下换色
+                const float fade = 0.55f + 0.45f * transition;
+
+                // 换句时的整行颜色过渡（由白渐入主题色）
                 const auto tint = palette.text.interpolatedWith (currentTint,
                                                                  juce::jlimit (0.0f, 1.0f, transition));
 
-                drawText (g, lineRect, line.text, size, tint, true,
-                          sung, palette.text, fade);
+                if (advanceMode == 1)
+                {
+                    // 逐字：未唱的字是白色，唱到的字由白渐变为主题色（字内渐变）
+                    drawText (g, lineRect, line.text, size, palette.text, true,
+                              sung, currentTint, fade);
+                }
+                else
+                {
+                    // 逐句：整行在换句时由白渐变为主题色
+                    drawText (g, lineRect, line.text, size, tint, true,
+                              -1.0f, palette.text, fade);
+                }
 
                 if (line.translation.isNotEmpty())
                     drawText (g, juce::Rectangle<float> (lineRect.getX(),
