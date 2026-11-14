@@ -3410,14 +3410,18 @@ void LyricSyncEditor::showEditorMenu (juce::TextEditor& te, juce::Point<int> scr
     {
         const auto text = te.getText();
         const int caret = juce::jlimit (0, text.length(), te.getCaretPosition());
-        const int start = text.lastIndexOfChar ('\n', juce::jmax (0, caret - 1));
-        int end = text.indexOfChar (caret, '\n');
 
-        if (end < 0)
-            end = text.length();
+        int start = -1;
 
-        sel = { juce::jmax (0, start + (start < 0 ? 0 : 1)),
-                juce::jmax (0, end) };
+        for (int i = caret - 1; i >= 0; --i)
+            if (text[i] == '\n') { start = i; break; }
+
+        int end = text.length();
+
+        for (int i = caret; i < text.length(); ++i)
+            if (text[i] == '\n') { end = i; break; }
+
+        sel = { start + 1, end };
 
         if (sel.getLength() > 0)
             te.setHighlightedRegion (sel);
