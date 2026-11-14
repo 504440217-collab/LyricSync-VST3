@@ -650,8 +650,11 @@ void LyricSyncEditor::drawText (juce::Graphics& g, juce::Rectangle<float> area,
         s.setColour (juce::Range<int> (0, juce::jmin (sungChars, text.length())),
                      sungColour.withAlpha (alpha));
 
+    // No reduceClipRegion() here: under a non-identity AffineTransform the
+    // clip rectangle's coordinate space is ambiguous, which could wrongly
+    // clip text in a scaled window. AttributedString already lays out inside
+    // `area` with by-char wrapping.
     const juce::Graphics::ScopedSaveState state (g);
-    g.reduceClipRegion (area.toNearestInt());
     s.draw (g, area);
 }
 
