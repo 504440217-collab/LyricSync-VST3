@@ -158,6 +158,10 @@ private:
     void enterTapMode();
     void stampTap();
     void undoStamp();
+    void restartTapLine (int index);      // 从这里重打：清掉该句及之后的时间
+    void nudgeTap (int deltaMs);          // 微调刚打好的那一句
+    void toggleTapPause();                // 手动预览下暂停/继续
+    std::vector<juce::Rectangle<float>> tapListRows (juce::Rectangle<float> area) const;
     void finishTapMode();
     void exitTapMode();
 
@@ -299,6 +303,10 @@ private:
     juce::TextButton  cancelTextButton;
     juce::TextButton  tapStartButton;
     juce::TextButton  tapUndoButton;
+    juce::TextButton  tapRestartButton;
+    juce::TextButton  tapNudgeBackButton;
+    juce::TextButton  tapNudgeFwdButton;
+    juce::TextButton  tapPauseButton;
     juce::TextButton  tapFinishButton;
     juce::TextButton  tapExitButton;
     juce::TextButton  measureButton;
