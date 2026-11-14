@@ -205,7 +205,7 @@ namespace
         return out.trim();
     }
 
-    bool isCjkChar (juce_wchar c)
+    bool isCjkChar (juce::juce_wchar c)
     {
         return (c >= 0x2e80 && c <= 0x9fff)
             || (c >= 0xf900 && c <= 0xfaff)
@@ -609,8 +609,8 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     clearImageButton.setButtonText (tr (Lang::TextId::clearImage));
 
     fontLabel.setText (tr (Lang::TextId::fontSize), juce::dontSendNotification);
-    hintToggle.setText (showHints ? tr (Lang::TextId::onLabel) : tr (Lang::TextId::offLabel),
-                        juce::dontSendNotification);
+    hintToggle.setButtonText (showHints ? tr (Lang::TextId::onLabel)
+                                        : tr (Lang::TextId::offLabel));
     hintToggle.setToggleState (showHints, juce::dontSendNotification);
     updateHint (true);
 
@@ -1877,9 +1877,8 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
     if (button == &hintToggle)
     {
         showHints = hintToggle.getToggleState();
-        hintToggle.setText (showHints ? tr (Lang::TextId::onLabel)
-                                      : tr (Lang::TextId::offLabel),
-                            juce::dontSendNotification);
+        hintToggle.setButtonText (showHints ? tr (Lang::TextId::onLabel)
+                                            : tr (Lang::TextId::offLabel));
         showHints = hintToggle.getToggleState();
         processor.setSetting (Settings::showHints, showHints);
         updateHint (true);

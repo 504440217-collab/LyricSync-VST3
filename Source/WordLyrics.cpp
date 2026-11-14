@@ -8,7 +8,7 @@
 
 namespace
 {
-    bool isCjkChar (juce_wchar c)
+    bool isCjkChar (juce::juce_wchar c)
     {
         return (c >= 0x2e80 && c <= 0x9fff)      // CJK 部首 / 汉字
             || (c >= 0xf900 && c <= 0xfaff)      // 兼容汉字
@@ -240,9 +240,9 @@ namespace
 
         for (int i = 0; i + 1 < size; i += 2)
         {
-            const auto lo = static_cast<juce_wchar> (bytes[i]);
-            const auto hi = static_cast<juce_wchar> (bytes[i + 1]);
-            wide << static_cast<juce_wchar> (lo | (hi << 8));
+            const auto lo = static_cast<juce::juce_wchar> (bytes[i]);
+            const auto hi = static_cast<juce::juce_wchar> (bytes[i + 1]);
+            wide << static_cast<juce::juce_wchar> (lo | (hi << 8));
         }
 
         int cjkWide = 0;
