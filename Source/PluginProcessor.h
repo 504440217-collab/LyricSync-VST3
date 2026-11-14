@@ -6,6 +6,38 @@
 #include "LyricsDocument.h"
 
 #include <atomic>
+#include <vector>
+
+//==============================================================================
+/**
+ *  简易节拍检测（给"前奏倒数 4 拍"用）。
+ *
+ *  音频线程只做一件事：把每 10 ms 的 RMS 能量塞进环形缓冲区（无锁、无分配）。
+ *  GUI 线程每秒调一次 analyse()，对能量差分出的"起点包络"做自相关，取 50–190 BPM
+ *  区间里最强的周期，再用抛物线插值细化。
+ */
+class TempoTracker
+{
+public:
+    void prepare (double sampleRate) noexcept;
+    void pushBlock (const juce::AudioBuffer<float>& buffer) noexcept;   // 音频线程
+    void analyse() noexcept;                                            // GUI 线程
+
+    double bpm        = 0.0;
+    double confidence = 0.0;
+
+private:
+    static constexpr int maxHops = 1600;      // 16 秒 × 10 ms
+
+    float energy[maxHops] {};
+    std::atomic<int> writeIndex { 0 };
+    std::atomic<int> available  { 0 };
+
+    int    hopSamples = 480;
+    double hopSeconds = 0.01;
+    float  hopSum     = 0.0f;
+    int    hopFill    = 0;
+};
 
 //==============================================================================
 /** 设置项的 key，编辑器与处理器共用。 */
@@ -102,6 +134,11 @@ public:
     std::atomic<double> audioStartSeconds { -1.0 };
     std::atomic<double> audioEndSeconds   { -1.0 };
 
+    //---- 节拍检测（GUI 线程读） ---------------------------------------------
+    void   analyseTempo()  noexcept { tempo.analyse(); }
+    double detectedBpm()   const noexcept { return tempo.bpm; }
+    double beatConfidence() const noexcept { return tempo.confidence; }
+
     /** 清空测量结果（换歌、或用户点击"重测音频"时调用）。 */
     void resetAudioRange();
 
@@ -135,6 +172,8 @@ private:
 
     void readHostTime();
     void updateAudioRange (const juce::AudioBuffer<float>& buffer);
+
+    TempoTracker tempo;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LyricSyncProcessor)
 };

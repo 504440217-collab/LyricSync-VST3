@@ -73,6 +73,7 @@ public:
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseUp   (const juce::MouseEvent& e) override;
     void mouseMove (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
     bool keyPressed (const juce::KeyPress& key) override;
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
@@ -130,6 +131,8 @@ private:
     void exitTapMode();
 
     void resetAudioMeasurement();
+    void exportLyrics();
+    void toggleZenMode();
     void setSkin (int index);
     void setLanguage (int next);
     void setOrientation (Orientation next);
@@ -187,6 +190,7 @@ private:
     int    colourIndex   = 0;
     int    advanceMode   = 0;              // 0 = 逐句跳动, 1 = 逐字跳动
     int    currentIndex  = -2;
+    int    previousIndex = -2;             // 换句时做颜色渐变
     float  transition    = 1.0f;
     float  displayIndex  = -1.0f;
 
@@ -197,6 +201,11 @@ private:
     bool   settingsOpen    = false;
     bool   aboutOpen       = false;
     bool   updatingCombos  = false;
+    bool   zenMode         = false;        // 纯享全屏（只显示歌词）
+    int    sizeBeforeZenW  = 960;
+    int    sizeBeforeZenH  = 600;
+    double tempoAnalyseMs  = 0.0;
+    double detectedBpm     = 0.0;
     bool   previewDragging = false;        // 在歌词区上下拖动预览
     double previewOffset   = 0.0;
     double previewDragStartOffset = 0.0;
@@ -247,6 +256,7 @@ private:
     juce::TextButton  tapFinishButton;
     juce::TextButton  tapExitButton;
     juce::TextButton  measureButton;
+    juce::TextButton  exportButton;
 
     juce::TextButton  demoClockToggle;
 

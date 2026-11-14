@@ -3,6 +3,7 @@
 #include "DemoLyrics.h"
 
 #include <cmath>
+#include <vector>
 
 //==============================================================================
 LyricSyncProcessor::LyricSyncProcessor()
@@ -40,7 +41,10 @@ LyricSyncProcessor::LyricSyncProcessor()
 void LyricSyncProcessor::prepareToPlay (double sampleRate, int)
 {
     if (sampleRate > 0.0)
+    {
         hostSampleRate.store (sampleRate);
+        tempo.prepare (sampleRate);
+    }
 }
 
 void LyricSyncProcessor::releaseResources()
@@ -70,6 +74,9 @@ void LyricSyncProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     juce::ignoreUnused (midi);
     readHostTime();
     updateAudioRange (buffer);
+
+    if (isPlaying.load())
+        tempo.pushBlock (buffer);
 }
 
 void LyricSyncProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -78,6 +85,9 @@ void LyricSyncProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer,
     juce::ignoreUnused (midi);
     readHostTime();
     updateAudioRange (buffer);
+
+    if (isPlaying.load())
+        tempo.pushBlock (buffer);
 }
 
 //------------------------------------------------------------------------------
@@ -353,6 +363,162 @@ juce::var LyricSyncProcessor::getSetting (const juce::Identifier& key, const juc
 {
     const juce::ScopedLock sl (settingsLock);
     return settings.getProperty (key, fallback);
+}
+
+
+//==============================================================================
+//  节拍检测
+//==============================================================================
+void TempoTracker::prepare (double sampleRate) noexcept
+{
+    hopSamples = juce::jmax (64, static_cast<int> (std::lround (sampleRate / 100.0)));  // 10 ms
+    hopSeconds = static_cast<double> (hopSamples) / juce::jmax (1.0, sampleRate);
+    hopSum = 0.0f;
+    hopFill = 0;
+    writeIndex.store (0);
+    available.store (0);
+    bpm = 0.0;
+    confidence = 0.0;
+}
+
+void TempoTracker::pushBlock (const juce::AudioBuffer<float>& buffer) noexcept
+{
+    const int numCh = buffer.getNumChannels();
+    const int numSamples = buffer.getNumSamples();
+
+    if (numCh <= 0 || numSamples <= 0 || hopSamples <= 0)
+        return;
+
+    int pos = 0;
+
+    while (pos < numSamples)
+    {
+        const int take = juce::jmin (numSamples - pos, hopSamples - hopFill);
+
+        float sum = 0.0f;
+
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            const float* data = buffer.getReadPointer (ch, pos);
+
+            for (int i = 0; i < take; ++i)
+                sum += data[i] * data[i];
+        }
+
+        hopSum += sum;
+        hopFill += take;
+        pos += take;
+
+        if (hopFill >= hopSamples)
+        {
+            const float rms = std::sqrt (hopSum / static_cast<float> (hopSamples * numCh));
+            const int idx = writeIndex.load (std::memory_order_relaxed);
+
+            energy[idx] = rms;
+            writeIndex.store ((idx + 1) % maxHops, std::memory_order_release);
+
+            if (available.load (std::memory_order_relaxed) < maxHops)
+                available.fetch_add (1, std::memory_order_relaxed);
+
+            hopSum = 0.0f;
+            hopFill = 0;
+        }
+    }
+}
+
+void TempoTracker::analyse() noexcept
+{
+    const int n = juce::jmin (available.load(), maxHops);
+
+    if (n < 400 || hopSeconds <= 0.0)
+    {
+        confidence = 0.0;
+        return;
+    }
+
+    std::vector<float> e (static_cast<size_t> (n));
+    const int wp = writeIndex.load (std::memory_order_acquire);
+
+    for (int i = 0; i < n; ++i)
+        e[static_cast<size_t> (i)] = energy[(wp - n + i + maxHops * 2) % maxHops];
+
+    float maxE = 1.0e-5f;
+
+    for (auto v : e)
+        maxE = juce::jmax (maxE, v);
+
+    // 起点包络：能量上升沿
+    std::vector<float> onset (static_cast<size_t> (n), 0.0f);
+
+    for (int i = 1; i < n; ++i)
+    {
+        const float d = (e[static_cast<size_t> (i)] - e[static_cast<size_t> (i - 1)]) / maxE;
+        onset[static_cast<size_t> (i)] = d > 0.0f ? d : 0.0f;
+    }
+
+    const int lagMin = juce::jmax (6, static_cast<int> (std::lround (60.0 / 200.0 / hopSeconds)));
+    const int lagMax = juce::jmin (n / 2, static_cast<int> (std::lround (60.0 / 45.0 / hopSeconds)));
+
+    if (lagMax <= lagMin + 2)
+    {
+        confidence = 0.0;
+        return;
+    }
+
+    std::vector<double> scores (static_cast<size_t> (lagMax + 2), 0.0);
+    double best = 0.0, total = 0.0;
+    int bestLag = 0, counted = 0;
+
+    for (int lag = lagMin; lag <= lagMax; ++lag)
+    {
+        double s = 0.0;
+
+        for (int i = 0; i + lag < n; ++i)
+            s += static_cast<double> (onset[static_cast<size_t> (i)])
+               * static_cast<double> (onset[static_cast<size_t> (i + lag)]);
+
+        s /= static_cast<double> (n - lag);
+        scores[static_cast<size_t> (lag)] = s;
+
+        total += s;
+        ++counted;
+
+        if (s > best)
+        {
+            best = s;
+            bestLag = lag;
+        }
+    }
+
+    if (bestLag <= 0 || counted == 0 || best <= 1.0e-9)
+    {
+        confidence = 0.0;
+        return;
+    }
+
+    double refined = static_cast<double> (bestLag);
+
+    if (bestLag > lagMin && bestLag < lagMax)
+    {
+        const double a = scores[static_cast<size_t> (bestLag - 1)];
+        const double b = scores[static_cast<size_t> (bestLag)];
+        const double c = scores[static_cast<size_t> (bestLag + 1)];
+        const double denom = a - 2.0 * b + c;
+
+        if (std::abs (denom) > 1.0e-12)
+            refined += 0.5 * (a - c) / denom;
+    }
+
+    double estimate = 60.0 / juce::jmax (1.0e-6, refined * hopSeconds);
+
+    while (estimate < 70.0)   estimate *= 2.0;
+    while (estimate > 175.0)  estimate *= 0.5;
+
+    const double mean = total / static_cast<double> (counted);
+    const double ratio = mean > 1.0e-9 ? best / mean : 0.0;
+
+    bpm = estimate;
+    confidence = juce::jlimit (0.0, 1.0, (ratio - 1.0) / 2.5);
 }
 
 //==============================================================================
