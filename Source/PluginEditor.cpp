@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.5.6";
+    const char* const kVersion = "1.6.0";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -287,6 +287,66 @@ juce::Font ScaledLookAndFeel::getPopupMenuFont()
 juce::Font ScaledLookAndFeel::getSliderPopupFont (juce::Slider&)
 {
     return juce::Font (typeface, 12.0f * scale, juce::Font::plain);
+}
+
+
+//==============================================================================
+void ScaledLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b,
+                                             const juce::Colour& backgroundColour,
+                                             bool over, bool down)
+{
+    const auto r = b.getLocalBounds().toFloat().reduced (0.5f);
+    const float corner = juce::jmax (4.0f, 8.0f * scale);
+
+    auto fill = backgroundColour;
+
+    if (down)        fill = fill.brighter (0.14f);
+    else if (over)   fill = fill.brighter (0.07f);
+
+    g.setColour (fill);
+    g.fillRoundedRectangle (r, corner);
+
+    // 玻璃高光：hover 时描边更亮
+    g.setColour (juce::Colours::white.withAlpha (over ? 0.22f : 0.10f));
+    g.drawRoundedRectangle (r, corner, juce::jmax (1.0f, 1.0f * scale));
+
+    if (b.getToggleState())
+    {
+        g.setColour (findColour (juce::TextButton::buttonOnColourId).withAlpha (0.85f));
+        g.fillRoundedRectangle (r, corner);
+        g.setColour (juce::Colours::white.withAlpha (0.30f));
+        g.drawRoundedRectangle (r, corner, juce::jmax (1.0f, 1.0f * scale));
+    }
+}
+
+void ScaledLookAndFeel::drawComboBox (juce::Graphics& g, int width, int height, bool,
+                                      int, int, int, int, juce::ComboBox& box)
+{
+    const auto r = juce::Rectangle<float> (0.0f, 0.0f,
+                                           static_cast<float> (width),
+                                           static_cast<float> (height)).reduced (0.5f);
+    const float corner = juce::jmax (4.0f, 7.0f * scale);
+
+    g.setColour (box.findColour (juce::ComboBox::backgroundColourId));
+    g.fillRoundedRectangle (r, corner);
+
+    g.setColour (juce::Colours::white.withAlpha (0.10f));
+    g.drawRoundedRectangle (r, corner, juce::jmax (1.0f, 1.0f * scale));
+
+    // 下拉箭头（自绘，避免依赖字体字形）
+    const float cx = static_cast<float> (width) - 16.0f * juce::jmax (0.85f, scale);
+    const float cy = static_cast<float> (height) * 0.5f;
+    const float s  = juce::jmax (3.0f, 3.4f * juce::jmax (0.85f, scale));
+
+    juce::Path arrow;
+    arrow.startNewSubPath (cx - s, cy - s * 0.5f);
+    arrow.lineTo (cx, cy + s * 0.7f);
+    arrow.lineTo (cx + s, cy - s * 0.5f);
+
+    g.setColour (box.findColour (juce::ComboBox::arrowColourId));
+    g.strokePath (arrow, juce::PathStrokeType (juce::jmax (1.0f, 1.4f * scale),
+                                               juce::PathStrokeType::curved,
+                                               juce::PathStrokeType::rounded));
 }
 
 //==============================================================================
@@ -745,9 +805,10 @@ void LyricSyncEditor::refreshLookAndFeel()
 {
     auto& l = lookAndFeel;
 
-    l.setColour (juce::TextButton::buttonColourId,   palette.panel);
-    l.setColour (juce::TextButton::buttonOnColourId, palette.accentSoft);
-    l.setColour (juce::TextButton::textColourOffId,  palette.text);
+    // 极夜玻璃：按钮本身几乎透明，只靠 1px 高光边和一层薄色区分
+    l.setColour (juce::TextButton::buttonColourId,   palette.text.withAlpha (0.070f));
+    l.setColour (juce::TextButton::buttonOnColourId, palette.accent.withAlpha (0.26f));
+    l.setColour (juce::TextButton::textColourOffId,  palette.dim);
     l.setColour (juce::TextButton::textColourOnId,   palette.text);
 
     l.setColour (juce::Label::textColourId,          palette.dim);
@@ -763,9 +824,9 @@ void LyricSyncEditor::refreshLookAndFeel()
     l.setColour (juce::TextEditor::focusedOutlineColourId,  palette.accent);
     l.setColour (juce::TextEditor::highlightColourId,       palette.accentSoft.withAlpha (0.35f));
 
-    l.setColour (juce::ComboBox::backgroundColourId,  palette.panel);
+    l.setColour (juce::ComboBox::backgroundColourId,  palette.text.withAlpha (0.055f));
     l.setColour (juce::ComboBox::textColourId,        palette.text);
-    l.setColour (juce::ComboBox::outlineColourId,     palette.panelEdge);
+    l.setColour (juce::ComboBox::outlineColourId,     palette.panelEdge.withAlpha (0.55f));
     l.setColour (juce::ComboBox::arrowColourId,       palette.dim);
     l.setColour (juce::ComboBox::buttonColourId,      palette.panelEdge);
     l.setColour (juce::PopupMenu::backgroundColourId, palette.panel);
@@ -1145,6 +1206,23 @@ void LyricSyncEditor::paint (juce::Graphics& g)
                                        palette.bgBottom, 0.0f, bounds.getHeight(), false);
         g.setGradientFill (gradient);
         g.fillAll();
+
+        // 两层柔光：右上青绿、左下靛蓝，让深色背景有玻璃质感
+        const float w = bounds.getWidth();
+        const float h = bounds.getHeight();
+
+        const auto glow = [&g] (float cx, float cy, float radius, juce::Colour c)
+        {
+            for (int i = 0; i < 4; ++i)
+            {
+                const float rr = radius * (1.0f - 0.22f * static_cast<float> (i));
+                g.setColour (c.withAlpha (0.030f));
+                g.fillEllipse (cx - rr, cy - rr, rr * 2.0f, rr * 2.0f);
+            }
+        };
+
+        glow (w * 0.84f, h * 0.02f, w * 0.36f, palette.accent);
+        glow (w * 0.06f, h * 1.02f, w * 0.32f, juce::Colour (0xff5b7bff));
     }
 
     // 逻辑画布
@@ -1230,10 +1308,17 @@ void LyricSyncEditor::paintHeader (juce::Graphics& g)
 
 void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area)
 {
-    g.setColour (palette.card);
-    g.fillRoundedRectangle (area, 18.0f);
-    g.setColour (palette.panelEdge.withAlpha (0.55f));
-    g.drawRoundedRectangle (area, 18.0f, 1.0f);
+    g.setColour (palette.card.withAlpha (0.82f));
+    g.fillRoundedRectangle (area, 20.0f);
+
+    // 外描边 + 内侧顶部高光，模拟一块玻璃
+    g.setColour (palette.panelEdge.withAlpha (0.60f));
+    g.drawRoundedRectangle (area, 20.0f, 1.0f);
+
+    juce::Path sheen;
+    sheen.addRoundedRectangle (area.reduced (1.5f), 19.0f, true, true, false, false);
+    g.setColour (juce::Colours::white.withAlpha (0.045f));
+    g.fillPath (sheen);
 
     if (tapMode)
     {
@@ -1549,10 +1634,10 @@ void LyricSyncEditor::paintSettings (juce::Graphics& g, juce::Rectangle<float> p
     g.setColour (juce::Colours::black.withAlpha (0.55f));
     g.fillRect (juce::Rectangle<float> (0.0f, 0.0f, baseW(), baseH()));
 
-    g.setColour (palette.panel);
-    g.fillRoundedRectangle (panel, 16.0f);
-    g.setColour (palette.panelEdge);
-    g.drawRoundedRectangle (panel, 16.0f, 1.0f);
+    g.setColour (palette.panel.withAlpha (0.96f));
+    g.fillRoundedRectangle (panel, 18.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.10f));
+    g.drawRoundedRectangle (panel.reduced (0.5f), 18.0f, 1.0f);
 
     drawText (g, juce::Rectangle<float> (panel.getX() + 24.0f, panel.getY() + 18.0f,
                                          panel.getWidth() - 100.0f, 28.0f),
@@ -1598,10 +1683,10 @@ void LyricSyncEditor::paintAbout (juce::Graphics& g, juce::Rectangle<float> pane
     g.setColour (juce::Colours::black.withAlpha (0.6f));
     g.fillRect (juce::Rectangle<float> (0.0f, 0.0f, baseW(), baseH()));
 
-    g.setColour (palette.panel);
-    g.fillRoundedRectangle (panel, 16.0f);
-    g.setColour (palette.panelEdge);
-    g.drawRoundedRectangle (panel, 16.0f, 1.0f);
+    g.setColour (palette.panel.withAlpha (0.96f));
+    g.fillRoundedRectangle (panel, 18.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.10f));
+    g.drawRoundedRectangle (panel.reduced (0.5f), 18.0f, 1.0f);
 
     const float x = panel.getX() + 30.0f;
     const float w = panel.getWidth() - 60.0f;

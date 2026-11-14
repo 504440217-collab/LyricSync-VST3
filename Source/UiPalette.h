@@ -13,11 +13,11 @@ struct UiPalette
     static UiPalette dark()
     {
         UiPalette p;
-        p.bgTop      = juce::Colour (0xff11141c);
-        p.bgBottom   = juce::Colour (0xff0b0d13);
-        p.panel      = juce::Colour (0xff1b2030);
-        p.panelEdge  = juce::Colour (0xff333c55);
-        p.card       = juce::Colour (0xff161b27);
+        p.bgTop      = juce::Colour (0xff121a29);
+        p.bgBottom   = juce::Colour (0xff070a12);
+        p.panel      = juce::Colour (0xff161e2e);
+        p.panelEdge  = juce::Colour (0xff4a5a78);
+        p.card       = juce::Colour (0xff131a27);
         p.text       = juce::Colour (0xfff2f5ff);
         p.dim        = juce::Colour (0xff9aa5bf);
         p.faint      = juce::Colour (0xff5f6a85);

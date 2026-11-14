@@ -27,6 +27,16 @@ public:
     juce::Font getLabelFont      (juce::Label&) override;
     juce::Font getPopupMenuFont  () override;
     juce::Font getSliderPopupFont (juce::Slider&) override;
+
+    /** 极夜玻璃：圆角半透明按钮 + 1px 高光描边。 */
+    void drawButtonBackground (juce::Graphics&, juce::Button&,
+                               const juce::Colour& backgroundColour,
+                               bool shouldDrawButtonAsHighlighted,
+                               bool shouldDrawButtonAsDown) override;
+
+    void drawComboBox (juce::Graphics&, int width, int height, bool isButtonDown,
+                       int buttonX, int buttonY, int buttonW, int buttonH,
+                       juce::ComboBox&) override;
 };
 
 //==============================================================================
