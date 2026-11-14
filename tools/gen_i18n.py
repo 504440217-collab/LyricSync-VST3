@@ -193,6 +193,8 @@ TABLE = [
     ("fontSimSun",   "宋体",     "SimSun"),
     ("fontKaiTi",    "楷体",     "KaiTi"),
     ("fontFangSong", "仿宋",     "FangSong"),
+    ("fontYouYuan",  "幼圆",     "YouYuan"),
+    ("fontLiSu",     "隶书",     "LiSu"),
     ("tipColor",    "歌词文字颜色", "Lyrics text colour"),
     ("tipAdvance",  "逐句：整句一起亮；逐字：歌词从第一个字扫到最后一个字",
                     "By line: the whole line lights up; by word: the highlight sweeps across"),
@@ -213,6 +215,7 @@ TABLE = [
 
     #--- 左下角轮播提示 -----------------------------------------------------
     ("hintA", "双击歌词区 = 纯享全屏，再双击返回", "Double-click the lyrics for full-screen, again to return"),
+    ("hintClick", "点这里换下一条提示", "Click for the next tip"),
     ("hintB", "歌词区按住上下拖动，可以翻看前后歌词", "Drag the lyrics up/down to preview other lines"),
     ("hintC", "齿轮里可换皮肤 / 字体 / 歌词颜色 / 窗口比例", "The gear holds skin, font, colour and window size"),
     ("hintD", "支持 LRC / 酷狗 KRC / SRT / TXT / Word 歌词", "LRC / Kugou KRC / SRT / TXT / Word lyrics"),

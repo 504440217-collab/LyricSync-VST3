@@ -58,6 +58,7 @@ private:
  */
 class LyricSyncEditor : public juce::AudioProcessorEditor,
                         private juce::Timer,
+                        public  juce::MouseListener,          // 接住提示词的点击
                         public  juce::FileDragAndDropTarget,
                         private juce::Button::Listener,
                         private juce::Slider::Listener,
@@ -75,6 +76,8 @@ public:
     void mouseUp   (const juce::MouseEvent& e) override;
     void mouseMove (const juce::MouseEvent& e) override;
     void mouseDoubleClick (const juce::MouseEvent& e) override;
+    void mouseWheelMove (const juce::MouseEvent& e,
+                         const juce::MouseWheelDetails& wheel) override;
     bool keyPressed (const juce::KeyPress& key) override;
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
@@ -180,6 +183,12 @@ private:
     void updateHint (bool force);
 
     juce::Font uiFont (float size, bool bold = false) const;
+
+    /** 界面控件（LookAndFeel）用的字体名：永远挑一个含汉字的字体。 */
+    juce::String uiTypefaceName() const;
+
+    /** 跳到下一条左下角提示。 */
+    void nextHint();
     juce::Colour lyricColour() const;
 
     juce::String tr (Lang::TextId id) const { return Lang::tr (id, language); }
@@ -228,6 +237,7 @@ private:
     int    sizeBeforeZenW  = 960;
     int    sizeBeforeZenH  = 600;
     double tempoAnalyseMs  = 0.0;
+    double wheelSaveMs     = 0.0;      // Ctrl+滚轮改字号时限制偏好写入频率
     double detectedBpm     = 0.0;
     bool   previewDragging = false;        // 在歌词区上下拖动预览
     double previewOffset   = 0.0;
@@ -257,6 +267,8 @@ private:
     juce::String editOriginalText;         // 原始歌词（未改动时保留逐字锚点）
 
     juce::Image customBg;
+    juce::String customBgPath;          // 存档副本路径（写进全局偏好，工程丢了也不怕）
+    bool prefsLoaded = false;           // 全局偏好存在时，外观以它为准
 
     //---- Widgets ------------------------------------------------------------
     IconButton gearButton  { IconButton::Icon::gear };

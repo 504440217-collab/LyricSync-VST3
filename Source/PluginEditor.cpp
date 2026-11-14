@@ -10,21 +10,23 @@
 
 namespace
 {
-    const char* const kVersion = "1.5.5";
+    const char* const kVersion = "1.5.6";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
+    // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
+    // 干脆换成两个中文手写体，界面和歌词都一定有字形。
     const char* const kFontNames[] =
     {
         "Microsoft YaHei UI", "DengXian", "SimHei", "SimSun",
-        "KaiTi", "FangSong", "Segoe UI", "Arial"
+        "KaiTi", "FangSong", "YouYuan", "LiSu"
     };
     const int kNumFonts = static_cast<int> (sizeof (kFontNames) / sizeof (kFontNames[0]));
 
-    // 前 6 个字体用中文名显示，后两个（Segoe UI / Arial）本来就是拉丁名
     const Lang::TextId kFontLabelIds[] =
     {
         Lang::TextId::fontYaHei, Lang::TextId::fontDengXian, Lang::TextId::fontSimHei,
-        Lang::TextId::fontSimSun, Lang::TextId::fontKaiTi, Lang::TextId::fontFangSong
+        Lang::TextId::fontSimSun, Lang::TextId::fontKaiTi, Lang::TextId::fontFangSong,
+        Lang::TextId::fontYouYuan, Lang::TextId::fontLiSu
     };
 
     // 0 = 跟随皮肤（用 accent）
@@ -213,8 +215,12 @@ namespace
             || (c >= 0x3000 && c <= 0x303f);
     }
 
-    /** Segoe UI / Arial 没有汉字字形，需要给中文单独指定字体。 */
-    bool typefaceNeedsCjkFallback (int index) { return index >= 6; }
+    /** 现在字体表里全是中文字体；保留这个判断，防止以后又混进纯拉丁字体。 */
+    bool typefaceNeedsCjkFallback (int index)
+    {
+        juce::ignoreUnused (index);
+        return false;
+    }
 
     /** 自定义皮肤图片的存档目录（复制一份，避免原图被移动后失效）。 */
     juce::File skinsDir()
@@ -407,6 +413,8 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     addLabel (offsetLabel, 12.0f, true,  juce::Justification::centred);
     addLabel (fileLabel,   11.5f, false, juce::Justification::centredLeft);
     addLabel (hintLabel,   11.0f, false, juce::Justification::centredLeft);
+    hintLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    hintLabel.addMouseListener (this, false);      // 点提示词 -> 换下一条
     addLabel (fontLabel,   11.0f, false, juce::Justification::centredLeft);
     addLabel (audioLabel,  11.5f, false, juce::Justification::centredRight);
 
@@ -455,6 +463,8 @@ void LyricSyncEditor::loadUiPrefs()
     if (! f.existsAsFile())
         return;
 
+    prefsLoaded = true;
+
     for (const auto& raw : juce::StringArray::fromLines (f.loadFileAsString()))
     {
         const auto line = raw.trim();
@@ -472,18 +482,26 @@ void LyricSyncEditor::loadUiPrefs()
         else if (key == "skin")        skinIndex   = value.getIntValue();
         else if (key == "font")        fontIndex   = value.getIntValue();
         else if (key == "colour")      colourIndex = value.getIntValue();
+        else if (key == "fontScale")   fontScale   = juce::jlimit (0.70, 1.60, value.getDoubleValue());
         else if (key == "bg" && value.isNotEmpty())
         {
             const juce::File bgFile (value);
 
             if (bgFile.existsAsFile())
+            {
                 customBg = juce::ImageFileFormat::loadFrom (bgFile);
+                customBgPath = value;
+            }
         }
     }
 
     skinIndex   = juce::jlimit (0, UiPalette::numSkins() - 1, skinIndex);
     fontIndex   = juce::jlimit (0, kNumFonts - 1, fontIndex);
     colourIndex = juce::jlimit (0, kNumLyricColours - 1, colourIndex);
+
+    // 「自定义图片」皮肤但图片已经找不到了：退回深色，避免看起来像"皮肤丢了"
+    if (skinIndex == 5 && ! customBg.isValid())
+        skinIndex = 0;
 }
 
 void LyricSyncEditor::saveUiPrefs()
@@ -497,23 +515,26 @@ void LyricSyncEditor::saveUiPrefs()
     lines.add ("skin=" + juce::String (skinIndex));
     lines.add ("font=" + juce::String (fontIndex));
     lines.add ("colour=" + juce::String (colourIndex));
-    lines.add ("bg=" + processor.getSetting (Settings::customBg, "").toString());
+    lines.add ("fontScale=" + juce::String (fontScale, 3));
+    lines.add ("bg=" + customBgPath);
 
     f.replaceWithText (lines.joinIntoString ("\n"));
 }
 
 //==============================================================================
-juce::Font LyricSyncEditor::uiFont (float size, bool bold) const
+juce::String LyricSyncEditor::uiTypefaceName() const
 {
     const int idx = juce::jlimit (0, kNumFonts - 1, fontIndex);
 
-    // 界面文字（按钮/标签）几乎都是中文：选到纯拉丁字体时退回微软雅黑，
-    // 否则整片中文都会变成空白。
-    const juce::String name = typefaceNeedsCjkFallback (idx)
-                                ? juce::String ("Microsoft YaHei UI")
-                                : juce::String (kFontNames[idx]);
+    if (typefaceNeedsCjkFallback (idx))
+        return "Microsoft YaHei UI";
 
-    return juce::Font (name, size, bold ? juce::Font::bold : juce::Font::plain);
+    return juce::String (kFontNames[idx]);
+}
+
+juce::Font LyricSyncEditor::uiFont (float size, bool bold) const
+{
+    return juce::Font (uiTypefaceName(), size, bold ? juce::Font::bold : juce::Font::plain);
 }
 
 juce::Colour LyricSyncEditor::lyricColour() const
@@ -531,25 +552,31 @@ void LyricSyncEditor::syncControlsFromSettings()
     language  = juce::jlimit (0, 1, static_cast<int> (processor.getSetting (Settings::language, 0)));
     demoMode  = static_cast<bool>  (processor.getSetting (Settings::demoClock, false));
 
-    const int skin = static_cast<int> (processor.getSetting (Settings::skin, -1));
-    if (skin >= 0)
-        skinIndex = juce::jlimit (0, UiPalette::numSkins() - 1, skin);
+    // 外观（皮肤 / 背景图 / 字体 / 歌词颜色 / 比例 / 版型）以全局偏好为准。
+    // 工程状态里也存了这些，但只要偏好文件存在就优先用它 —— 否则删掉插件重新加载、
+    // 或者换个工程，外观就会被工程状态里的旧值（或默认值）顶掉。
+    if (! prefsLoaded)
+    {
+        const int skin = static_cast<int> (processor.getSetting (Settings::skin, -1));
+        if (skin >= 0)
+            skinIndex = juce::jlimit (0, UiPalette::numSkins() - 1, skin);
 
-    const int zoom = static_cast<int> (processor.getSetting (Settings::zoom, -1));
-    if (zoom > 0)
-        zoomPercent = juce::jlimit (50, 200, zoom);
+        const int zoom = static_cast<int> (processor.getSetting (Settings::zoom, -1));
+        if (zoom > 0)
+            zoomPercent = juce::jlimit (50, 200, zoom);
 
-    const int orient = static_cast<int> (processor.getSetting (Settings::orientation, -1));
-    if (orient >= 0)
-        orientation = (orient == 1) ? Orientation::vertical : Orientation::horizontal;
+        const int orient = static_cast<int> (processor.getSetting (Settings::orientation, -1));
+        if (orient >= 0)
+            orientation = (orient == 1) ? Orientation::vertical : Orientation::horizontal;
 
-    const int font = static_cast<int> (processor.getSetting (Settings::font, -1));
-    if (font >= 0)
-        fontIndex = juce::jlimit (0, kNumFonts - 1, font);
+        const int font = static_cast<int> (processor.getSetting (Settings::font, -1));
+        if (font >= 0)
+            fontIndex = juce::jlimit (0, kNumFonts - 1, font);
 
-    const int col = static_cast<int> (processor.getSetting (Settings::colour, -1));
-    if (col >= 0)
-        colourIndex = juce::jlimit (0, kNumLyricColours - 1, col);
+        const int col = static_cast<int> (processor.getSetting (Settings::colour, -1));
+        if (col >= 0)
+            colourIndex = juce::jlimit (0, kNumLyricColours - 1, col);
+    }
 
     const int adv = static_cast<int> (processor.getSetting (Settings::advance, -1));
     if (adv >= 0)
@@ -559,8 +586,12 @@ void LyricSyncEditor::syncControlsFromSettings()
     showHints = hints != 0;
 
     const auto bgPath = processor.getSetting (Settings::customBg, "").toString();
-    if (bgPath.isNotEmpty() && juce::File (bgPath).existsAsFile())
+
+    if (! customBg.isValid() && bgPath.isNotEmpty() && juce::File (bgPath).existsAsFile())
+    {
         customBg = juce::ImageFileFormat::loadFrom (juce::File (bgPath));
+        customBgPath = bgPath;
+    }
 
     const double s = static_cast<double> (processor.getSetting (Settings::audioStart, -1.0));
     const double e = static_cast<double> (processor.getSetting (Settings::audioEnd,   -1.0));
@@ -575,8 +606,11 @@ void LyricSyncEditor::syncControlsFromSettings()
 
     audioTotalSeconds = static_cast<double> (processor.getSetting (Settings::audioTotal, -1.0));
 
+    if (skinIndex == 5 && ! customBg.isValid())
+        skinIndex = 0;
+
     palette = UiPalette::forSkin (skinIndex);
-    lookAndFeel.typeface = juce::String (kFontNames[fontIndex]);
+    lookAndFeel.typeface = uiTypefaceName();
     fontSlider.setValue (fontScale, juce::dontSendNotification);
     demoClockToggle.setToggleState (demoMode, juce::dontSendNotification);
 }
@@ -642,7 +676,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
 
     fontBox.clear (juce::dontSendNotification);
     for (int i = 0; i < kNumFonts; ++i)
-        fontBox.addItem (i < 6 ? tr (kFontLabelIds[i]) : juce::String (kFontNames[i]), i + 1);
+        fontBox.addItem (tr (kFontLabelIds[i]), i + 1);
     fontBox.setSelectedId (fontIndex + 1, juce::dontSendNotification);
 
     colourBox.clear (juce::dontSendNotification);
@@ -696,6 +730,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     clearImageButton.setTooltip (tr (Lang::TextId::tipClearImage));
     closeSettingsButton.setTooltip (tr (Lang::TextId::tipClose));
     hintToggle      .setTooltip (tr (Lang::TextId::showHints));
+    hintLabel       .setTooltip (tr (Lang::TextId::hintClick));
 
     if (reloadDemoLyrics && usingDemoLyrics)
     {
@@ -917,7 +952,7 @@ void LyricSyncEditor::resized()
     uiTransform = juce::AffineTransform (uiScaleX, 0.0f, originX,
                                          0.0f, uiScaleY, originY);
     lookAndFeel.scale = uiScale;
-    lookAndFeel.typeface = juce::String (kFontNames[fontIndex]);
+    lookAndFeel.typeface = uiTypefaceName();
 
     updateScaledFonts();
 
@@ -1967,6 +2002,7 @@ void LyricSyncEditor::sliderValueChanged (juce::Slider* slider)
     {
         fontScale = fontSlider.getValue();
         processor.setSetting (Settings::fontScale, fontScale);
+        saveUiPrefs();
         repaint();
     }
 }
@@ -1974,6 +2010,13 @@ void LyricSyncEditor::sliderValueChanged (juce::Slider* slider)
 //==============================================================================
 void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 {
+    // 点左下角提示词：换下一条（不打断任何其它交互）
+    if (e.eventComponent == &hintLabel)
+    {
+        nextHint();
+        return;
+    }
+
     const auto toLogical = [this] (juce::Point<float> p)
     {
         return juce::Point<float> ((p.x - originX) / juce::jmax (0.01f, uiScaleX),
@@ -2015,12 +2058,61 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 
 void LyricSyncEditor::mouseDrag (const juce::MouseEvent& e)
 {
-    if (! previewDragging)
+    if (! previewDragging || e.eventComponent != this)
         return;
 
     // 往上拖 = 往后看；0.04 秒/像素，一句大约几十像素
     previewOffset = previewDragStartOffset
                   + static_cast<double> (previewDragStartY - e.y) * 0.04;
+
+    repaint();
+}
+
+void LyricSyncEditor::nextHint()
+{
+    ++hintIndex;
+    hintRotateMs = juce::Time::getMillisecondCounterHiRes();
+    updateHint (true);
+    repaint();
+}
+
+void LyricSyncEditor::mouseWheelMove (const juce::MouseEvent& e,
+                                      const juce::MouseWheelDetails& wheel)
+{
+    const auto mods = juce::ModifierKeys::currentModifiers;
+    const bool mod = mods.isCtrlDown() || mods.isCommandDown();
+
+    // 只有「鼠标停在歌词区 + 按住 Ctrl」才改字号，其它情况照常把滚轮交给别处
+    if (! mod || e.eventComponent != this
+        || settingsOpen || aboutOpen || editing || tapMode
+        || ! stageArea().transformedBy (uiTransform).contains (e.position))
+    {
+        juce::AudioProcessorEditor::mouseWheelMove (e, wheel);
+        return;
+    }
+
+    double step = wheel.deltaY >= 0.0 ? 0.04 : -0.04;
+
+    if (wheel.isReversed)
+        step = -step;
+
+    const double next = juce::jlimit (0.70, 1.60, fontScale + step);
+
+    if (std::abs (next - fontScale) < 1.0e-4)
+        return;
+
+    fontScale = next;
+    fontSlider.setValue (fontScale, juce::dontSendNotification);
+    processor.setSetting (Settings::fontScale, fontScale);
+
+    // 滚轮可能连续触发，限制写文件频率
+    const double now = juce::Time::getMillisecondCounterHiRes();
+
+    if (now - wheelSaveMs > 400.0)
+    {
+        wheelSaveMs = now;
+        saveUiPrefs();
+    }
 
     repaint();
 }
@@ -2037,7 +2129,7 @@ void LyricSyncEditor::mouseUp (const juce::MouseEvent&)
 
 void LyricSyncEditor::mouseMove (const juce::MouseEvent& e)
 {
-    if (previewDragging)
+    if (previewDragging || e.eventComponent != this)
         return;
 
     const bool hand = ! editing && ! tapMode && ! settingsOpen && ! aboutOpen
@@ -2103,6 +2195,7 @@ void LyricSyncEditor::setSkin (int index)
     palette = UiPalette::forSkin (skinIndex);
 
     processor.setSetting (Settings::skin, skinIndex);
+    processor.setSetting (Settings::customBg, customBgPath);
     saveUiPrefs();
     refreshLookAndFeel();
     updateVisibility();
@@ -2120,7 +2213,7 @@ void LyricSyncEditor::setSkin (int index)
 void LyricSyncEditor::setFontIndex (int index)
 {
     fontIndex = juce::jlimit (0, kNumFonts - 1, index);
-    lookAndFeel.typeface = juce::String (kFontNames[fontIndex]);
+    lookAndFeel.typeface = uiTypefaceName();
 
     processor.setSetting (Settings::font, fontIndex);
     saveUiPrefs();
@@ -2199,8 +2292,9 @@ void LyricSyncEditor::pickBackgroundImage()
             }
         }
 
-        processor.setSetting (Settings::customBg, stored.getFullPathName());
-        setSkin (5);
+        customBgPath = stored.getFullPathName();
+        processor.setSetting (Settings::customBg, customBgPath);
+        setSkin (5);                    // setSkin 里会把 bg 写进全局偏好
         updateVisibility();
         repaint();
     });
@@ -2209,6 +2303,7 @@ void LyricSyncEditor::pickBackgroundImage()
 void LyricSyncEditor::clearBackgroundImage()
 {
     customBg = juce::Image {};
+    customBgPath.clear();
     processor.setSetting (Settings::customBg, "");
 
     if (skinIndex == 5)
