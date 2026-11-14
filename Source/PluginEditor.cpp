@@ -1315,10 +1315,13 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
     g.setColour (palette.panelEdge.withAlpha (0.60f));
     g.drawRoundedRectangle (area, 20.0f, 1.0f);
 
-    juce::Path sheen;
-    sheen.addRoundedRectangle (area.reduced (1.5f), 19.0f, true, true, false, false);
-    g.setColour (juce::Colours::white.withAlpha (0.045f));
-    g.fillPath (sheen);
+    // 上半部到中部渐隐的白色高光（Path 没有逐角重载，这里用渐变填充更稳）
+    juce::ColourGradient sheen (juce::Colours::white.withAlpha (0.055f),
+                                area.getX(), area.getY(),
+                                juce::Colours::transparentWhite,
+                                area.getX(), area.getCentreY(), false);
+    g.setGradientFill (sheen);
+    g.fillRoundedRectangle (area.reduced (1.5f), 19.0f);
 
     if (tapMode)
     {
