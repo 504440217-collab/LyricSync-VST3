@@ -39,7 +39,7 @@ JUCE 的 `AudioPlayHead::getPosition()` 在 VST3 下读的正是 Steinberg `Proc
 | 手动预览 | 内置模拟播放头，可在没有宿主时间码时校对歌词、拖动定位 |
 | 状态保存 | 歌词全文、偏移、字号、主题、**界面语言**、窗口尺寸随宿主工程一起保存 |
 | 界面语言 | 右上角下拉框切换 **中文 / English**：按钮、提示、状态、解析警告、内置示例歌词全部同步切换；已载入的用户歌词保持原样 |
-| 外观 | 深/浅两套主题，窗口自由缩放 |
+| 外观 | 深/浅两套主题；**整窗等比缩放**（固定 960×600 逻辑画布，绘制、控件、字体共用一个缩放系数，窗口保持 8:5，宿主强制改比例时自动居中留边，不会裁切按钮或进度条） |
 | 附带 | Standalone 独立程序（不上 DAW 也能当提词器用） |
 
 ---
@@ -171,6 +171,12 @@ cmake --build build --config Release --parallel
 **Q：界面文字全是 `æ¯å…` 之类的乱码？**
 这是 1.0.0 早期构建的已知问题，已修复。根因不是字体、也不是系统区域设置：JUCE 的 `juce::String (const char*)` **只接受纯 ASCII**，源码里的中文 UTF-8 字节被逐字节当成单个字符，于是显示成乱码（二进制里的字节其实是对的）。现在所有界面文案统一由 `Lang::tr()` 经 `juce::String::fromUTF8()` 解码，并且 `Source/I18n.cpp` 是**纯 ASCII 的 UTF-8 转义源码**（由 `tools/gen_i18n.py` 生成），彻底不依赖编译器代码页。请重新下载新版 `.vst3` 覆盖安装。
 
+**Q：拉大/拉小窗口后，按钮被裁掉、进度条不见了？**
+早期版本用绝对像素坐标，窗口比例一变，底部按钮行和进度条就会被挤出可视区。现在整个界面绘制在一张固定的 **960×600 逻辑画布**上：背景绘制走 `AffineTransform`，控件走 `scaledRect()`，字体走 `ScaledLookAndFeel`，三者共用同一个 `uiScale = min(w/960, h/600)`。窗口默认被约束为 8:5；即使宿主强行给别的比例，画布也会等比居中，绝不会裁切。进度条（seek bar）改为在逻辑画布上自绘，任何尺寸下都可见。
+
+**Q：按钮、下拉框里的字变成方块（□）？**
+之前只有 Label 和大字歌词用了中文字体，按钮/下拉框走 JUCE 默认 sans-serif，遇到中文就缺字形。现在 `ScaledLookAndFeel` 统一给 `TextButton / ComboBox / Label / PopupMenu / Slider` 指定同一套中文 capable 字体，并把 `− ▶ ■ ♪ ⚠ · … 「」` 这类容易缺字形的符号全部换成 ASCII（`- > [] ! | ...`）。「手动预览」也改成 toggle 型 TextButton，走同一套字体。
+
 **Q：载入的歌词文件乱码？**
 文件支持 UTF-8、UTF-16 LE、GBK(GB18030) 自动识别；若仍异常，用记事本另存为 UTF-8 再载入。界面语言切换只影响插件自带文案，不会转码你载入的歌词。
 
@@ -187,7 +193,7 @@ cmake --build build --config Release --parallel
 ```
 Source/
   PluginProcessor.h/.cpp   插件主体：读宿主播放头、直通音频、工程状态保存
-  PluginEditor.h/.cpp      界面：三行歌词、逐字高亮、控件、拖放、手动预览
+  PluginEditor.h/.cpp      界面：三行歌词、逐字高亮、等比缩放画布、统一中文字体、拖放、手动预览
   LyricsDocument.h/.cpp    LRC/增强LRC/SRT/TXT 解析 + 二分查找
   I18n.h/.cpp              中/英双语字符串表（自动生成，纯 ASCII UTF-8 转义）
   UiPalette.h              深/浅配色

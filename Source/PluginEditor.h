@@ -8,8 +8,32 @@
 
 //==============================================================================
 /**
+ *  LookAndFeel that keeps EVERY widget on the same Chinese-capable typeface and
+ *  scales its font together with the UI. Without this, TextButton / ComboBox
+ *  fall back to JUCE's default sans-serif and Chinese labels render as tofu.
+ */
+class ScaledLookAndFeel : public juce::LookAndFeel_V4
+{
+public:
+    float scale = 1.0f;
+
+    juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
+    juce::Font getComboBoxFont   (juce::ComboBox&) override;
+    juce::Font getLabelFont      (juce::Label&) override;
+    juce::Font getPopupMenuFont  () override;
+    juce::Font getSliderPopupFont (juce::Slider&) override;
+};
+
+//==============================================================================
+/**
  *  Plugin UI. All localised text is supplied by Lang::tr() in applyUiText(),
  *  so the constructor never embeds non-ASCII literals in a juce::String.
+ *
+ *  Layout uses a fixed 960x600 logical canvas. Everything (painting via an
+ *  AffineTransform, widgets via scaledRect(), fonts via ScaledLookAndFeel) is
+ *  scaled by one single factor, so resizing can never clip the progress bar or
+ *  push controls out of view. The editor also asks the host to keep the 8:5
+ *  aspect ratio; if a host forces another ratio, the canvas is centred instead.
  *
  *  The editor never advances time itself: every frame reads the host's
  *  absolute project time and binary-searches the lyrics document.
@@ -32,6 +56,9 @@ public:
     void filesDropped (const juce::StringArray& files, int x, int y) override;
 
 private:
+    static constexpr float baseW = 960.0f;
+    static constexpr float baseH = 600.0f;
+
     void timerCallback() override;
     void buttonClicked (juce::Button* button) override;
     void sliderValueChanged (juce::Slider* slider) override;
@@ -45,6 +72,10 @@ private:
                       const juce::String& text, float size, juce::Colour colour,
                       bool bold, int sungChars = -1,
                       juce::Colour sungColour = {}, float alpha = 1.0f);
+
+    //---- Scaled layout ------------------------------------------------------
+    juce::Rectangle<int> scaledRect (float x, float y, float w, float h) const;
+    void updateScaledFonts();
 
     //---- Interaction --------------------------------------------------------
     void openFileDialog();
@@ -72,7 +103,12 @@ private:
     LyricSyncProcessor& processor;
 
     UiPalette palette;
-    juce::LookAndFeel_V4 lookAndFeel;
+    ScaledLookAndFeel lookAndFeel;
+
+    float uiScale  = 1.0f;
+    float originX  = 0.0f;
+    float originY  = 0.0f;
+    juce::AffineTransform uiTransform;
 
     double displayTime   = 0.0;
     double offsetMs      = 0.0;
@@ -100,7 +136,7 @@ private:
     juce::TextButton  pasteButton;
     juce::TextButton  demoButton;
     juce::TextButton  themeButton;
-    juce::ComboBox    languageBox;        // 中文 / English
+    juce::ComboBox    languageBox;        // Chinese / English
     juce::TextButton  minusButton;
     juce::TextButton  plusButton       { "+" };
     juce::TextButton  resetButton;
@@ -109,7 +145,9 @@ private:
     juce::TextButton  applyTextButton;
     juce::TextButton  cancelTextButton;
 
-    juce::ToggleButton demoClockToggle;
+    // A toggled TextButton (rather than ToggleButton) so the Chinese label
+    // also goes through getTextButtonFont() and never renders as tofu.
+    juce::TextButton demoClockToggle;
 
     juce::Slider seekSlider  { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
     juce::Slider fontSlider  { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };

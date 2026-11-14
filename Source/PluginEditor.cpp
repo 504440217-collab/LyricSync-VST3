@@ -82,6 +82,34 @@ namespace
 }
 
 //==============================================================================
+// Every widget must use the same Chinese-capable font, otherwise buttons and
+// combo boxes fall back to a Latin-only typeface and show "tofu" squares.
+juce::Font ScaledLookAndFeel::getTextButtonFont (juce::TextButton&, int)
+{
+    return uiFont (12.5f * scale);
+}
+
+juce::Font ScaledLookAndFeel::getComboBoxFont (juce::ComboBox&)
+{
+    return uiFont (12.0f * scale);
+}
+
+juce::Font ScaledLookAndFeel::getLabelFont (juce::Label&)
+{
+    return uiFont (12.0f * scale);
+}
+
+juce::Font ScaledLookAndFeel::getPopupMenuFont()
+{
+    return uiFont (13.0f * scale);
+}
+
+juce::Font ScaledLookAndFeel::getSliderPopupFont (juce::Slider&)
+{
+    return uiFont (12.0f * scale);
+}
+
+//==============================================================================
 LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     : juce::AudioProcessorEditor (owner),
       processor (owner),
@@ -92,20 +120,31 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
 
     syncControlsFromSettings();
 
+    // Keep the window itself at the design aspect ratio, so resizing is a true
+    // uniform zoom rather than a stretch. The logical-canvas fallback in
+    // paint()/resized() still protects us if a host ignores this constrainer.
     setResizable (true, true);
-    setResizeLimits (720, 460, 2200, 1400);
-    setSize (juce::jlimit (720, 2200, static_cast<int> (processor.getSetting (Settings::windowW, 960))),
-             juce::jlimit (460, 1400, static_cast<int> (processor.getSetting (Settings::windowH, 600))));
+    setResizeLimits (480, 300, 2400, 1500);
+
+    if (auto* constrainer = getConstrainer())
+        constrainer->setFixedAspectRatio (static_cast<double> (baseW / baseH));
+
+    const int savedW = static_cast<int> (processor.getSetting (Settings::windowW, 960));
+    const int w = juce::jlimit (480, 2400, savedW);
+    setSize (w, juce::roundToInt (static_cast<float> (w) / (baseW / baseH)));
 
     //--------------------------------------------------------------------------
     for (auto* b : { &loadButton, &pasteButton, &demoButton, &themeButton,
                      &minusButton, &plusButton, &resetButton,
                      &demoPlayButton, &demoStopButton,
-                     &applyTextButton, &cancelTextButton })
+                     &applyTextButton, &cancelTextButton,
+                     &demoClockToggle })
     {
         b->addListener (this);
         addAndMakeVisible (*b);
     }
+
+    demoClockToggle.setClickingTogglesState (true);
 
     languageBox.setEditableText (false);
     languageBox.setJustificationType (juce::Justification::centred);
@@ -119,9 +158,6 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
 
     languageBox.addListener (this);
     addAndMakeVisible (languageBox);
-
-    demoClockToggle.addListener (this);
-    addAndMakeVisible (demoClockToggle);
 
     seekSlider.setRange (0.0, 60.0, 0.01);
     seekSlider.addListener (this);
@@ -247,15 +283,17 @@ void LyricSyncEditor::refreshLookAndFeel()
     l.setColour (juce::Slider::trackColourId,        palette.accentSoft);
     l.setColour (juce::Slider::backgroundColourId,   palette.track);
 
+    // The seek bar is drawn by paintFooter() on the fixed logical canvas, so
+    // its progress is always visible regardless of slider look-and-feel.
+    seekSlider.setColour (juce::Slider::trackColourId,      juce::Colours::transparentBlack);
+    seekSlider.setColour (juce::Slider::backgroundColourId, juce::Colours::transparentBlack);
+    seekSlider.setColour (juce::Slider::thumbColourId,      juce::Colours::transparentBlack);
+
     l.setColour (juce::TextEditor::backgroundColourId,      palette.card);
     l.setColour (juce::TextEditor::textColourId,            palette.text);
     l.setColour (juce::TextEditor::outlineColourId,         palette.panelEdge);
     l.setColour (juce::TextEditor::focusedOutlineColourId,  palette.accent);
     l.setColour (juce::TextEditor::highlightColourId,       palette.accentSoft.withAlpha (0.35f));
-
-    l.setColour (juce::ToggleButton::textColourId,          palette.dim);
-    l.setColour (juce::ToggleButton::tickColourId,          palette.accent);
-    l.setColour (juce::ToggleButton::tickDisabledColourId,  palette.faint);
 
     l.setColour (juce::ComboBox::backgroundColourId,  palette.panel);
     l.setColour (juce::ComboBox::textColourId,        palette.text);
@@ -276,7 +314,7 @@ void LyricSyncEditor::refreshLookAndFeel()
     metaLabel.setColour (juce::Label::textColourId, palette.faint);
     fontLabel.setColour (juce::Label::textColourId, palette.faint);
 
-    editorBox.applyFontToAllText (uiFont (14.0f));
+    editorBox.applyFontToAllText (uiFont (14.0f * uiScale));
     repaint();
 }
 
@@ -305,29 +343,60 @@ void LyricSyncEditor::updateEditingVisibility()
 }
 
 //==============================================================================
+juce::Rectangle<int> LyricSyncEditor::scaledRect (float x, float y, float w, float h) const
+{
+    return juce::Rectangle<int> (
+        juce::roundToInt (originX + x * uiScale),
+        juce::roundToInt (originY + y * uiScale),
+        juce::jmax (1, juce::roundToInt (w * uiScale)),
+        juce::jmax (1, juce::roundToInt (h * uiScale)));
+}
+
+void LyricSyncEditor::updateScaledFonts()
+{
+    clockLabel .setFont (uiFont (21.0f  * uiScale, true));
+    statusLabel.setFont (uiFont (11.0f  * uiScale));
+    offsetLabel.setFont (uiFont (12.0f  * uiScale, true));
+    fileLabel  .setFont (uiFont (11.5f * uiScale));
+    metaLabel  .setFont (uiFont (11.5f * uiScale));
+    hintLabel  .setFont (uiFont (11.0f  * uiScale));
+    fontLabel  .setFont (uiFont (11.0f  * uiScale));
+    editorBox  .setFont (uiFont (14.0f  * uiScale));
+    editorBox.applyFontToAllText (uiFont (14.0f * uiScale));
+}
+
 void LyricSyncEditor::resized()
 {
-    const int w = getWidth();
-    const int h = getHeight();
-    constexpr int pad = 22;
+    const float w = static_cast<float> (getWidth());
+    const float h = static_cast<float> (getHeight());
 
-    clockLabel    .setBounds (w - 470, 8, 280, 30);
-    statusLabel   .setBounds (w - 470, 37, 280, 18);
-    languageBox   .setBounds (w - 190, 18, 78, 28);
-    themeButton   .setBounds (w - 104, 18, 80, 28);
+    // One single scale for painting, widgets and fonts. If the host forces a
+    // non-8:5 window, the whole canvas is centred with letterbox margins
+    // instead of being stretched or clipped.
+    uiScale = juce::jmax (0.1f, juce::jmin (w / baseW, h / baseH));
+    originX = (w - baseW * uiScale) * 0.5f;
+    originY = (h - baseH * uiScale) * 0.5f;
+    // Explicit matrix: p -> uiScale * p + origin. Chained scaled() would
+    // scale the translation too, so build the matrix directly.
+    uiTransform = juce::AffineTransform (uiScale, 0.0f, originX,
+                                         0.0f, uiScale, originY);
+    lookAndFeel.scale = uiScale;
 
-    const juce::Rectangle<int> stage (pad, 72, w - pad * 2, h - 72 - 152);
-    editorBox.setBounds (stage.reduced (2));
+    updateScaledFonts();
 
-    int y = h - 146;
-    seekSlider.setBounds (pad, y, w - pad * 2, 22);
-    y += 28;
+    clockLabel    .setBounds (scaledRect (490, 8, 280, 30));
+    statusLabel   .setBounds (scaledRect (490, 37, 280, 18));
+    languageBox   .setBounds (scaledRect (770, 18, 78, 28));
+    themeButton   .setBounds (scaledRect (856, 18, 80, 28));
 
-    int x = pad;
-    auto place = [&] (juce::Component& c, int width, int height = 30)
+    editorBox .setBounds (scaledRect (24, 74, 912, 372));
+    seekSlider.setBounds (scaledRect (22, 450, 916, 26));
+
+    float x = 22.0f;
+    auto place = [&] (juce::Component& c, float bw, float bh = 30.0f)
     {
-        c.setBounds (x, y, width, height);
-        x += width + 8;
+        c.setBounds (scaledRect (x, 482.0f, bw, bh));
+        x += bw + 8.0f;
     };
 
     if (editing)
@@ -340,30 +409,27 @@ void LyricSyncEditor::resized()
         place (loadButton, 92);
         place (pasteButton, 104);
         place (demoButton, 88);
-        x += 14;
+        x += 14.0f;
         place (minusButton, 30);
         place (offsetLabel, 84);
         place (plusButton, 30);
         place (resetButton, 50);
-        x += 14;
+        x += 14.0f;
         place (fontLabel, 34);
-        fontSlider.setBounds (x, y + 4, 110, 22);
-        x += 118;
-        demoClockToggle.setBounds (x, y + 2, 100, 26);
-        x += 108;
-        demoPlayButton.setBounds (x, y, 34, 30);
-        demoStopButton.setBounds (x + 40, y, 34, 30);
+        fontSlider.setBounds (scaledRect (x, 486, 110, 22));
+        x += 118.0f;
+        demoClockToggle.setBounds (scaledRect (x, 484, 112, 26));
+        x += 120.0f;
+        demoPlayButton.setBounds (scaledRect (x, 482, 34, 30));
+        demoStopButton.setBounds (scaledRect (x + 40.0f, 482, 34, 30));
     }
 
-    y += 36;
-    fileLabel.setBounds (pad, y, w / 2 - pad, 22);
-    metaLabel.setBounds (w / 2, y, w / 2 - pad, 22);
+    fileLabel.setBounds (scaledRect (22, 518, 458, 22));
+    metaLabel.setBounds (scaledRect (480, 518, 458, 22));
+    hintLabel.setBounds (scaledRect (22, 542, 916, 20));
 
-    y += 24;
-    hintLabel.setBounds (pad, y, w - pad * 2, 20);
-
-    processor.setSetting (Settings::windowW, w);
-    processor.setSetting (Settings::windowH, h);
+    processor.setSetting (Settings::windowW, getWidth());
+    processor.setSetting (Settings::windowH, getHeight());
 }
 
 //==============================================================================
@@ -377,12 +443,16 @@ void LyricSyncEditor::paint (juce::Graphics& g)
     g.setGradientFill (gradient);
     g.fillAll();
 
-    g.setColour (palette.accent.withAlpha (0.045f));
-    g.fillEllipse (w - 230.0f, -190.0f, 460.0f, 460.0f);
+    // Everything from here on is drawn in the fixed 960x600 logical canvas.
+    const juce::Graphics::ScopedSaveState state (g);
+    g.addTransform (uiTransform);
 
-    paintHeader (g, juce::Rectangle<float> (0.0f, 0.0f, w, 64.0f));
-    paintStage  (g, juce::Rectangle<float> (22.0f, 72.0f, w - 44.0f, h - 224.0f));
-    paintFooter (g, juce::Rectangle<float> (0.0f, h - 152.0f, w, 152.0f));
+    g.setColour (palette.accent.withAlpha (0.045f));
+    g.fillEllipse (baseW - 230.0f, -190.0f, 460.0f, 460.0f);
+
+    paintHeader (g, juce::Rectangle<float> (0.0f, 0.0f, baseW, 64.0f));
+    paintStage  (g, juce::Rectangle<float> (22.0f, 72.0f, baseW - 44.0f, baseH - 224.0f));
+    paintFooter (g, juce::Rectangle<float> (0.0f, baseH - 152.0f, baseW, 152.0f));
 }
 
 void LyricSyncEditor::paintHeader (juce::Graphics& g, juce::Rectangle<float> area)
@@ -487,19 +557,6 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
             drawText (g, transArea, line.translation, transSize,
                       palette.dim.withAlpha (0.8f), false, -1, {}, fade);
 
-        // Progress within the current line
-        const double start = line.time;
-        const double end   = doc.lineEnd (idx);
-        const double frac  = juce::jlimit (0.0, 1.0,
-                                          (displayTime - start) / juce::jmax (0.01, end - start));
-
-        const float barW = 180.0f * widthScale;
-        auto bar = juce::Rectangle<float> (area.getCentreX() - barW * 0.5f,
-                                           area.getBottom() - 20.0f, barW, 3.0f);
-        g.setColour (palette.track);
-        g.fillRoundedRectangle (bar, 2.0f);
-        g.setColour (palette.accent.withAlpha (0.9f));
-        g.fillRoundedRectangle (bar.withWidth (barW * static_cast<float> (frac)), 2.0f);
     }
     else
     {
@@ -517,6 +574,28 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
         }
     }
 
+    //---- Line progress: always drawn, even before the first lyric -----------
+    const float barW = 180.0f * widthScale;
+    auto bar = juce::Rectangle<float> (area.getCentreX() - barW * 0.5f,
+                                       area.getBottom() - 20.0f, barW, 3.0f);
+    g.setColour (palette.track);
+    g.fillRoundedRectangle (bar, 2.0f);
+
+    double frac = 0.0;
+    if (idx >= 0)
+    {
+        const double start = doc.line (idx).time;
+        const double end   = doc.lineEnd (idx);
+        frac = juce::jlimit (0.0, 1.0,
+                             (displayTime - start) / juce::jmax (0.01, end - start));
+    }
+
+    if (frac > 0.0)
+    {
+        g.setColour (palette.accent.withAlpha (0.9f));
+        g.fillRoundedRectangle (bar.withWidth (barW * static_cast<float> (frac)), 2.0f);
+    }
+
     //---- Next line ----------------------------------------------------------
     const int nextIdx = idx < 0 ? 0 : idx + 1;
     if (nextIdx < doc.size())
@@ -529,6 +608,27 @@ void LyricSyncEditor::paintFooter (juce::Graphics& g, juce::Rectangle<float> are
     g.setColour (palette.panelEdge.withAlpha (0.28f));
     g.drawLine (22.0f, area.getY() + 27.0f, area.getRight() - 22.0f,
                 area.getY() + 27.0f, 1.0f);
+
+    // The seek bar is painted on the fixed logical canvas, so it stays visible
+    // and correctly sized no matter how the host resizes the editor window.
+    const auto track = juce::Rectangle<float> (22.0f, 461.0f, baseW - 44.0f, 6.0f);
+    g.setColour (palette.track);
+    g.fillRoundedRectangle (track, 3.0f);
+
+    const double duration = processor.lyrics().totalDuration();
+    const double frac = duration > 0.0
+        ? juce::jlimit (0.0, 1.0, displayTime / duration) : 0.0;
+
+    if (frac > 0.0)
+    {
+        g.setColour (palette.accent.withAlpha (0.85f));
+        g.fillRoundedRectangle (track.withWidth (track.getWidth() * static_cast<float> (frac)), 3.0f);
+    }
+
+    const float thumbX = juce::jlimit (track.getX(), track.getRight(),
+                                       track.getX() + track.getWidth() * static_cast<float> (frac));
+    g.setColour (palette.accent);
+    g.fillEllipse (thumbX - 6.0f, track.getCentreY() - 6.0f, 12.0f, 12.0f);
 }
 
 void LyricSyncEditor::drawText (juce::Graphics& g, juce::Rectangle<float> area,

@@ -23,8 +23,8 @@ from pathlib import Path
 # key, Chinese, English
 # ---------------------------------------------------------------------------
 TABLE = [
-    ("appSubtitle",      "DAW 歌词同步  ·  跟随宿主播放头",
-                         "DAW lyrics  ·  follows the host playhead"),
+    ("appSubtitle",      "DAW 歌词同步  |  跟随宿主播放头",
+                         "DAW lyrics  |  follows the host playhead"),
     ("currentLine",      "CURRENT LINE", "CURRENT LINE"),
     ("loadLyrics",       "载入歌词", "Load Lyrics"),
     ("pasteEdit",        "粘贴 / 编辑", "Paste / Edit"),
@@ -34,44 +34,44 @@ TABLE = [
     ("reset",            "归零", "Reset"),
     ("applyLyrics",      "应用歌词", "Apply"),
     ("cancel",           "取消", "Cancel"),
-    ("manualPreview",    "手动预览", "Manual Preview"),
+    ("manualPreview",    "手动预览", "Preview"),
     ("fontSize",         "字号", "Font"),
     ("languageChinese",  "中文", "中文"),
     ("languageEnglish",  "English", "English"),
     ("uiLanguage",       "选择界面语言", "Select UI language"),
-    ("separator",        "  ·  ", "  ·  "),
-    ("minusSymbol",      "−", "−"),
-    ("playSymbol",       "▶", "▶"),
-    ("stopSymbol",       "■", "■"),
+    ("separator",        "  |  ", "  |  "),
+    ("minusSymbol",      "-", "-"),
+    ("playSymbol",       ">", ">"),
+    ("stopSymbol",       "[]", "[]"),
 
-    ("hint",             "提示：歌词跟随宿主播放头 · 任意跳转 / 循环 / 倒退都会立即对齐 · 支持拖入 .lrc / .srt / .txt",
-                         "Tip: lyrics follow the host playhead · seeking, looping and rewinding align instantly · drop .lrc / .srt / .txt"),
-    ("demoFileDesc",     "示例歌词  ·  拖入文件即可替换",
-                         "Demo lyrics  ·  drop a file to replace"),
+    ("hint",             "提示：歌词跟随宿主播放头 | 任意跳转 / 循环 / 倒退都会立即对齐 | 支持拖入 .lrc / .srt / .txt",
+                         "Tip: lyrics follow the host playhead | seeking, looping and rewinding align instantly | drop .lrc / .srt / .txt"),
+    ("demoFileDesc",     "示例歌词  |  拖入文件即可替换",
+                         "Demo lyrics  |  drop a file to replace"),
     ("savedFileDesc",    "宿主工程中保存的歌词", "Lyrics saved in host project"),
-    ("emptyStage",       "把 .lrc / .srt / .txt 拖进窗口\n或点击左下角「载入歌词」",
+    ("emptyStage",       "把 .lrc / .srt / .txt 拖进窗口\n或点击左下角的 载入歌词 按钮",
                          "Drop a .lrc / .srt / .txt file here\nor click Load Lyrics below"),
-    ("intro",            "♪  前奏", "♪  Intro"),
+    ("intro",            "前奏", "Intro"),
     ("nextLineIn",       "下一句还有 ", "Next line in "),
     ("secondsSuffix",    " 秒", " s"),
     ("lineCountSuffix",  " 句", " lines"),
-    ("karaokeSuffix",    "  ·  逐字", "  ·  karaoke"),
-    ("warningPrefix",    "    ⚠ ", "    ! "),
+    ("karaokeSuffix",    "  |  逐字", "  |  karaoke"),
+    ("warningPrefix",    "    ! ", "    ! "),
     ("readFailed",       "读取失败：", "Could not read: "),
     ("emptyFile",        "文件为空或无法读取（支持 UTF-8 / UTF-16 / GBK）",
                          "File is empty or unreadable (UTF-8 / UTF-16 / GBK supported)"),
     ("pastedLabel",      "粘贴的歌词文本", "Pasted lyrics"),
     ("fileChooserTitle", "选择歌词文件", "Choose a lyrics file"),
 
-    ("statusManual",     "手动预览  ·  拖动进度条定位",
-                         "Manual Preview  ·  drag the slider to seek"),
-    ("statusWaiting",    "等待宿主时间码…（可勾选手动预览）",
-                         "Waiting for host timecode... (or enable Manual Preview)"),
+    ("statusManual",     "手动预览  |  拖动进度条定位",
+                         "Preview  |  drag the slider to seek"),
+    ("statusWaiting",    "等待宿主时间码...（可勾选手动预览）",
+                         "Waiting for host timecode... (or enable Preview)"),
     ("statusRecording",  "录音中", "Recording"),
     ("statusPlaying",    "播放中", "Playing"),
     ("statusStopped",    "已停止", "Stopped"),
-    ("statusLoop",       "  ·  循环", "  ·  Loop"),
-    ("statusIdle",       "  ·  宿主暂未推送时间码", "  ·  Host timecode idle"),
+    ("statusLoop",       "  |  循环", "  |  Loop"),
+    ("statusIdle",       "  |  宿主暂未推送时间码", "  |  Host timecode idle"),
     ("barPrefix",        "小节 ", "Bar "),
 
     # Parser warnings (used by LyricsDocument)
@@ -80,13 +80,13 @@ TABLE = [
     ("warnNoTimestamps2", " 秒自动排布；建议改用带时间戳的 LRC 文件。",
                           " s per line. Use a timed LRC for accuracy."),
     ("warnFirstLine1",    "第一句在 ", "First line starts at "),
-    ("warnFirstLine2",    " 秒之后，若歌词整体错位请检查「偏移」或 LRC 的 [offset:] 标签。",
+    ("warnFirstLine2",    " 秒之后，若歌词整体错位请检查偏移或 LRC 的 [offset:] 标签。",
                           " s. If lyrics are offset, check Offset or the LRC [offset:] tag."),
 ]
 
 DEMO_ZH = """[ti:LyricSync 演示歌词]
 [ar:Muzi Audio Tools]
-[00:00.00]LyricSync · 歌词同步显示
+[00:00.00]LyricSync | 歌词同步显示
 [00:04.00]把 .lrc 文件拖进窗口就能开始
 [00:08.50]播放头跳到哪里
 [00:12.00]歌词就跟到哪里
