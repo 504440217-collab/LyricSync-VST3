@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.7.4";
+    const char* const kVersion = "1.7.5";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -3402,7 +3402,27 @@ void LyricSyncEditor::toggleTapPause()
 //==============================================================================
 void LyricSyncEditor::showEditorMenu (juce::TextEditor& te, juce::Point<int> screenPos)
 {
-    const auto sel = te.getHighlightedRegion();
+    auto sel = te.getHighlightedRegion();
+
+    // 没选中任何文字时，把光标所在的整行选上：
+    // 否则"剪切 / 复制 / 删除"全是灰的，看起来就像菜单不能用
+    if (sel.getLength() <= 0)
+    {
+        const auto text = te.getText();
+        const int caret = juce::jlimit (0, text.length(), te.getCaretPosition());
+        const int start = text.lastIndexOfChar ('\n', juce::jmax (0, caret - 1));
+        int end = text.indexOfChar (caret, '\n');
+
+        if (end < 0)
+            end = text.length();
+
+        sel = { juce::jmax (0, start + (start < 0 ? 0 : 1)),
+                juce::jmax (0, end) };
+
+        if (sel.getLength() > 0)
+            te.setHighlightedRegion (sel);
+    }
+
     const bool hasSel = sel.getLength() > 0;
 
     juce::PopupMenu m;
