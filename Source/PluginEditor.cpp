@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.5.1";
+    const char* const kVersion = "1.5.2";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     const char* const kFontNames[] =
@@ -37,15 +37,76 @@ namespace
     const int kZoomSteps[] = { 50, 75, 100, 125, 150, 200 };
     const int kNumZoomSteps = static_cast<int> (sizeof (kZoomSteps) / sizeof (kZoomSteps[0]));
 
+    /** 纯 ASCII 手工拼时间码（不走 printf，避免任何格式化/编码意外）。 */
     juce::String formatTimecode (double seconds)
     {
         const bool negative = seconds < 0.0;
         seconds = std::abs (seconds);
 
-        const int mins = static_cast<int> (seconds / 60.0);
-        const double secs = seconds - static_cast<double> (mins) * 60.0;
+        int mins = static_cast<int> (seconds / 60.0);
+        double secs = seconds - static_cast<double> (mins) * 60.0;
 
-        return juce::String::formatted ("%s%02d:%06.3f", negative ? "-" : "", mins, secs);
+        int whole = static_cast<int> (std::floor (secs));
+        int milli = static_cast<int> (std::lround ((secs - static_cast<double> (whole)) * 1000.0));
+
+        if (milli >= 1000)
+        {
+            milli -= 1000;
+            ++whole;
+        }
+
+        if (whole >= 60)
+        {
+            whole -= 60;
+            ++mins;
+        }
+
+        juce::String s;
+
+        if (negative)
+            s << "-";
+
+        if (mins < 10)
+            s << "0";
+
+        s << juce::String (mins) << ":";
+
+        if (whole < 10)
+            s << "0";
+
+        s << juce::String (whole) << ".";
+
+        if (milli < 10)       s << "00";
+        else if (milli < 100) s << "0";
+
+        s << juce::String (milli);
+
+        return s;
+    }
+
+    /** 去掉增强 LRC 的 <mm:ss.xx> 逐字锚点（编辑时显示用，保留整行时间戳）。 */
+    juce::String stripWordAnchors (const juce::String& in)
+    {
+        juce::String out;
+
+        for (int i = 0; i < in.length();)
+        {
+            if (in[i] == '<')
+            {
+                const int close = in.indexOfChar (i, '>');
+
+                if (close > i)
+                {
+                    i = close + 1;
+                    continue;
+                }
+            }
+
+            out += in[i];
+            ++i;
+        }
+
+        return out;
     }
 
     juce::String formatShort (double seconds)
@@ -278,9 +339,6 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     setResizable (true, true);
     setResizeLimits (280, 280, 2600, 2600);
 
-    if (auto* constrainer = getConstrainer())
-        constrainer->setFixedAspectRatio (static_cast<double> (baseW() / baseH()));
-
     applyWindowSize();
 
     //--------------------------------------------------------------------------
@@ -304,7 +362,7 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
 
     demoClockToggle.setClickingTogglesState (true);
 
-    for (auto* box : { &languageBox, &zoomBox, &skinBox, &fontBox, &colourBox })
+    for (auto* box : { &languageBox, &zoomBox, &skinBox, &fontBox, &colourBox, &advanceBox })
     {
         box->setEditableText (false);
         box->setJustificationType (juce::Justification::centred);
@@ -457,6 +515,10 @@ void LyricSyncEditor::syncControlsFromSettings()
     if (col >= 0)
         colourIndex = juce::jlimit (0, kNumLyricColours - 1, col);
 
+    const int adv = static_cast<int> (processor.getSetting (Settings::advance, -1));
+    if (adv >= 0)
+        advanceMode = juce::jlimit (0, 1, adv);
+
     const auto bgPath = processor.getSetting (Settings::customBg, "").toString();
     if (bgPath.isNotEmpty() && juce::File (bgPath).existsAsFile())
         customBg = juce::ImageFileFormat::loadFrom (juce::File (bgPath));
@@ -545,6 +607,11 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
                            i + 1);
     colourBox.setSelectedId (colourIndex + 1, juce::dontSendNotification);
 
+    advanceBox.clear (juce::dontSendNotification);
+    advanceBox.addItem (tr (Lang::TextId::advLine), 1);
+    advanceBox.addItem (tr (Lang::TextId::advChar), 2);
+    advanceBox.setSelectedId (advanceMode + 1, juce::dontSendNotification);
+
     updatingCombos = false;
 
     //---- Hover explanations -------------------------------------------------
@@ -575,6 +642,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     skinBox         .setTooltip (tr (Lang::TextId::tipSkin));
     fontBox         .setTooltip (tr (Lang::TextId::tipTypeface));
     colourBox       .setTooltip (tr (Lang::TextId::tipColor));
+    advanceBox      .setTooltip (tr (Lang::TextId::tipAdvance));
     languageBox     .setTooltip (tr (Lang::TextId::uiLanguage));
     orientHButton   .setTooltip (tr (Lang::TextId::tipLayout));
     orientVButton   .setTooltip (tr (Lang::TextId::tipLayout));
@@ -682,6 +750,7 @@ void LyricSyncEditor::updateVisibility()
     tapExitButton   .setVisible (tapMode && ! overlay);
 
     for (auto* c : { static_cast<juce::Component*> (&languageBox),
+                     static_cast<juce::Component*> (&advanceBox),
                      static_cast<juce::Component*> (&zoomBox),
                      static_cast<juce::Component*> (&skinBox),
                      static_cast<juce::Component*> (&fontBox),
@@ -703,10 +772,10 @@ void LyricSyncEditor::updateVisibility()
 juce::Rectangle<int> LyricSyncEditor::scaledRect (float x, float y, float w, float h) const
 {
     return juce::Rectangle<int> (
-        juce::roundToInt (originX + x * uiScale),
-        juce::roundToInt (originY + y * uiScale),
-        juce::jmax (1, juce::roundToInt (w * uiScale)),
-        juce::jmax (1, juce::roundToInt (h * uiScale)));
+        juce::roundToInt (originX + x * uiScaleX),
+        juce::roundToInt (originY + y * uiScaleY),
+        juce::jmax (1, juce::roundToInt (w * uiScaleX)),
+        juce::jmax (1, juce::roundToInt (h * uiScaleY)));
 }
 
 juce::Rectangle<float> LyricSyncEditor::stageArea() const
@@ -720,7 +789,7 @@ juce::Rectangle<float> LyricSyncEditor::stageArea() const
 juce::Rectangle<float> LyricSyncEditor::settingsPanelArea() const
 {
     if (orientation == Orientation::vertical)
-        return { 40.0f, 180.0f, 520.0f, 482.0f };
+        return { 40.0f, 170.0f, 520.0f, 500.0f };
 
     return { 200.0f, 66.0f, 560.0f, 470.0f };
 }
@@ -757,11 +826,26 @@ void LyricSyncEditor::resized()
     const float w = static_cast<float> (getWidth());
     const float h = static_cast<float> (getHeight());
 
-    uiScale = juce::jmax (0.1f, juce::jmin (w / baseW(), h / baseH()));
-    originX = (w - baseW() * uiScale) * 0.5f;
-    originY = (h - baseH() * uiScale) * 0.5f;
-    uiTransform = juce::AffineTransform (uiScale, 0.0f, originX,
-                                         0.0f, uiScale, originY);
+    float sx = w / baseW();
+    float sy = h / baseH();
+
+    // 允许拖上下左右边框做横向 / 纵向拉伸；但如果比例差太多会严重变形，
+    // 这时退回等比（居中留边），保证文字始终好读。
+    const float ratio = sx / juce::jmax (0.01f, sy);
+    if (ratio > 1.35f || ratio < 0.74f)
+    {
+        const float s = juce::jmin (sx, sy);
+        sx = sy = s;
+    }
+
+    uiScaleX = juce::jmax (0.1f, sx);
+    uiScaleY = juce::jmax (0.1f, sy);
+    uiScale  = std::sqrt (uiScaleX * uiScaleY);
+
+    originX = (w - baseW() * uiScaleX) * 0.5f;
+    originY = (h - baseH() * uiScaleY) * 0.5f;
+    uiTransform = juce::AffineTransform (uiScaleX, 0.0f, originX,
+                                         0.0f, uiScaleY, originY);
     lookAndFeel.scale = uiScale;
     lookAndFeel.typeface = juce::String (kFontNames[fontIndex]);
 
@@ -876,7 +960,7 @@ void LyricSyncEditor::resized()
         const bool v = (orientation == Orientation::vertical);
         const float ctrlX = panel.getX() + (v ? 168.0f : 190.0f);
         const float ctrlW = panel.getRight() - 24.0f - ctrlX;
-        const float rowH = 48.0f;
+        const float rowH = 44.0f;
 
         closeSettingsButton.setBounds (scaledRect (panel.getRight() - 46.0f,
                                                    panel.getY() + 12.0f, 34.0f, 34.0f));
@@ -898,7 +982,8 @@ void LyricSyncEditor::resized()
         y += rowH;
 
         fontBox  .setBounds (scaledRect (ctrlX, y, ctrlW, 28));  y += rowH;
-        colourBox.setBounds (scaledRect (ctrlX, y, ctrlW, 28));
+        colourBox.setBounds (scaledRect (ctrlX, y, ctrlW, 28));  y += rowH;
+        advanceBox.setBounds (scaledRect (ctrlX, y, ctrlW, 28));
     }
 
     //---- About panel --------------------------------------------------------
@@ -981,6 +1066,12 @@ void LyricSyncEditor::paintHeader (juce::Graphics& g)
     drawText (g, juce::Rectangle<float> (48.0f, 10.0f, 250.0f, 28.0f),
               "LyricSync", 20.0f, palette.text, true, -1, {}, 1.0f,
               juce::Justification::centredLeft);
+
+    g.setColour (palette.faint.withAlpha (0.85f));
+    g.setFont (uiFont (10.0f));
+    g.drawText (juce::String ("v") + kVersion,
+                juce::Rectangle<float> (160.0f, 17.0f, 80.0f, 16.0f),
+                juce::Justification::centredLeft, false);
 
     if (orientation == Orientation::horizontal)
         drawText (g, juce::Rectangle<float> (48.0f, 35.0f, 330.0f, 18.0f),
@@ -1068,12 +1159,17 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
                            * static_cast<float> (fontScale);
 
     const float innerH = area.getHeight() - 78.0f;
-    const int radius = juce::jlimit (2, 4, static_cast<int> (innerH / 92.0f));
+
+    // 行距必须跟着字号走，否则字号调大后相邻行会叠在一起（竖版最明显）。
+    const float maxLineSize = 34.0f * widthScale;
+    const float minGap = maxLineSize * 1.16f;
+
+    int radius = static_cast<int> ((innerH / juce::jmax (1.0f, minGap) - 1.0f) * 0.5f);
+    radius = juce::jlimit (1, 4, radius);
 
     const auto inner = juce::Rectangle<float> (area.getX() + 26.0f, area.getY() + 36.0f,
                                                area.getWidth() - 52.0f, innerH);
-    const float spacing = juce::jlimit (26.0f, 56.0f,
-                                        inner.getHeight() / (2.0f * radius + 1.0f));
+    const float spacing = inner.getHeight() / static_cast<float> (2 * radius + 1);
     const float centreY = inner.getCentreY();
 
     const bool hasCurrent = currentIndex >= 0 && currentIndex < doc.size();
@@ -1116,8 +1212,22 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
 
             if (isCurrent)
             {
-                const bool karaoke = line.hasKaraoke();
-                const int  sung    = karaoke ? doc.sungCharsAt (line, displayTime) : -1;
+                // 逐字模式：没有逐字时间戳的普通 LRC，也按整行时长均匀地把高亮扫过去。
+                int sung = -1;
+
+                if (line.hasKaraoke())
+                {
+                    sung = doc.sungCharsAt (line, displayTime);
+                }
+                else if (advanceMode == 1 && line.text.isNotEmpty())
+                {
+                    const double s0 = line.time;
+                    const double s1 = doc.lineEnd (i);
+                    const double p = juce::jlimit (0.0, 1.0,
+                                                   (displayTime - s0) / juce::jmax (0.05, s1 - s0));
+                    sung = static_cast<int> (std::round (p * static_cast<double> (line.text.length())));
+                }
+
                 const float fade   = 0.60f + 0.40f * transition;
 
                 drawText (g, lineRect, line.text, size, currentTint, true,
@@ -1137,6 +1247,18 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
                           ad < 1.5f, -1, {}, alpha);
             }
         }
+    }
+
+    if (std::abs (previewOffset) > 0.02)
+    {
+        const juce::String badge = tr (Lang::TextId::previewBadge) + "  "
+                                 + (previewOffset >= 0.0 ? "+" : "-")
+                                 + juce::String (std::abs (previewOffset), 1) + " s";
+
+        drawText (g, juce::Rectangle<float> (area.getRight() - 220.0f, area.getBottom() - 46.0f,
+                                             190.0f, 18.0f),
+                  badge, 11.0f, palette.warn, false, -1, {}, 1.0f,
+                  juce::Justification::centredRight);
     }
 
     if (! hasCurrent)
@@ -1260,7 +1382,7 @@ void LyricSyncEditor::paintSettings (juce::Graphics& g, juce::Rectangle<float> p
     const float labelW = ctrlX - labelX - 10.0f;
 
     float y = panel.getY() + 92.0f;
-    const float rowH = 48.0f;
+    const float rowH = 44.0f;
 
     const Lang::TextId labels[] =
     {
@@ -1270,7 +1392,8 @@ void LyricSyncEditor::paintSettings (juce::Graphics& g, juce::Rectangle<float> p
         Lang::TextId::setSkin,
         Lang::TextId::setBackground,
         Lang::TextId::setFont,
-        Lang::TextId::setColor
+        Lang::TextId::setColor,
+        Lang::TextId::setAdvance
     };
 
     for (auto id : labels)
@@ -1379,16 +1502,20 @@ void LyricSyncEditor::timerCallback()
     auto& doc = processor.lyrics();
     const auto range = audioRange();
 
+    // 一开始播放就把手动预览偏移清掉，歌词立刻回到播放头位置
+    if (! previewDragging && previewOffset != 0.0 && processor.isPlaying.load())
+        previewOffset = 0.0;
+
     if (demoMode)
     {
         if (demoPlaying)
             demoTime = juce::jlimit (range.getStart(), range.getEnd(), demoTime + dt);
 
-        displayTime = demoTime;
+        displayTime = demoTime + previewOffset;
     }
     else
     {
-        displayTime = processor.positionSeconds.load() + offsetMs / 1000.0;
+        displayTime = processor.positionSeconds.load() + offsetMs / 1000.0 + previewOffset;
     }
 
     const int idx = doc.findIndexAt (displayTime);
@@ -1583,6 +1710,14 @@ void LyricSyncEditor::comboBoxChanged (juce::ComboBox* box)
     if (box == &skinBox)      { setSkin (skinBox.getSelectedId() - 1); return; }
     if (box == &fontBox)      { setFontIndex (fontBox.getSelectedId() - 1); return; }
     if (box == &colourBox)    { setLyricColour (colourBox.getSelectedId() - 1); return; }
+
+    if (box == &advanceBox)
+    {
+        advanceMode = juce::jlimit (0, 1, advanceBox.getSelectedId() - 1);
+        processor.setSetting (Settings::advance, advanceMode);
+        repaint();
+        return;
+    }
 }
 
 void LyricSyncEditor::sliderValueChanged (juce::Slider* slider)
@@ -1600,8 +1735,8 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 {
     const auto toLogical = [this] (juce::Point<float> p)
     {
-        const float s = juce::jmax (0.01f, uiScale);
-        return juce::Point<float> ((p.x - originX) / s, (p.y - originY) / s);
+        return juce::Point<float> ((p.x - originX) / juce::jmax (0.01f, uiScaleX),
+                                   (p.y - originY) / juce::jmax (0.01f, uiScaleY));
     };
 
     if (aboutOpen)
@@ -1624,7 +1759,51 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
     {
         grabKeyboardFocus();
         stampTap();
+        return;
     }
+
+    // 歌词区域：按住上下拖动 = 手动预览（不出声，只是把歌词往前/后翻看）
+    if (! editing && stageArea().transformedBy (uiTransform).contains (e.position))
+    {
+        previewDragging = true;
+        previewDragStartY = e.y;
+        previewDragStartOffset = previewOffset;
+        setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+    }
+}
+
+void LyricSyncEditor::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! previewDragging)
+        return;
+
+    // 往上拖 = 往后看；0.04 秒/像素，一句大约几十像素
+    previewOffset = previewDragStartOffset
+                  + static_cast<double> (previewDragStartY - e.y) * 0.04;
+
+    repaint();
+}
+
+void LyricSyncEditor::mouseUp (const juce::MouseEvent&)
+{
+    if (! previewDragging)
+        return;
+
+    previewDragging = false;
+    setMouseCursor (juce::MouseCursor::NormalCursor);
+    repaint();
+}
+
+void LyricSyncEditor::mouseMove (const juce::MouseEvent& e)
+{
+    if (previewDragging)
+        return;
+
+    const bool hand = ! editing && ! tapMode && ! settingsOpen && ! aboutOpen
+                   && stageArea().transformedBy (uiTransform).contains (e.position);
+
+    setMouseCursor (hand ? juce::MouseCursor::DraggingHandCursor
+                         : juce::MouseCursor::NormalCursor);
 }
 
 bool LyricSyncEditor::keyPressed (const juce::KeyPress& key)
@@ -1732,9 +1911,6 @@ void LyricSyncEditor::setOrientation (Orientation next)
     processor.setSetting (Settings::orientation,
                           orientation == Orientation::vertical ? 1 : 0);
     saveUiPrefs();
-
-    if (auto* constrainer = getConstrainer())
-        constrainer->setFixedAspectRatio (static_cast<double> (baseW() / baseH()));
 
     applyWindowSize();
     refreshLookAndFeel();
@@ -1955,7 +2131,13 @@ void LyricSyncEditor::enterEditMode()
 {
     editing = true;
     tapMode = false;
-    editorBox.setText (processor.getSetting (Settings::lyricsText, "").toString());
+
+    // 增强 LRC / KRC 的 <mm:ss.xx> 逐字锚点在编辑框里非常乱，显示时去掉；
+    // 原文留在 editOriginalText，没改动就原样保留（不丢逐字时间）。
+    editOriginalText = processor.getSetting (Settings::lyricsText, "").toString();
+    editShownText = stripWordAnchors (editOriginalText);
+
+    editorBox.setText (editShownText);
     editorBox.setVisible (true);
     editorBox.toFront (true);
     refreshLookAndFeel();
@@ -1967,7 +2149,12 @@ void LyricSyncEditor::enterEditMode()
 void LyricSyncEditor::leaveEditMode (bool apply)
 {
     if (apply)
-        loadLyricsText (editorBox.getText(), tr (Lang::TextId::pastedLabel));
+    {
+        const auto current = editorBox.getText();
+
+        if (current.trim() != editShownText.trim())
+            loadLyricsText (current, tr (Lang::TextId::pastedLabel));
+    }
 
     editing = false;
     editorBox.setVisible (false);

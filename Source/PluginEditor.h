@@ -26,6 +26,9 @@ public:
     juce::Font getLabelFont      (juce::Label&) override;
     juce::Font getPopupMenuFont  () override;
     juce::Font getSliderPopupFont (juce::Slider&) override;
+
+    /** 颜色一改就让所有控件重新读色（否则 ComboBox 内部的 Label 会留着旧色）。 */
+    void colourChanged() override { sendLookAndFeelChange(); }
 };
 
 //==============================================================================
@@ -70,6 +73,9 @@ public:
     void resized() override;
 
     void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDrag (const juce::MouseEvent& e) override;
+    void mouseUp   (const juce::MouseEvent& e) override;
+    void mouseMove (const juce::MouseEvent& e) override;
     bool keyPressed (const juce::KeyPress& key) override;
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
@@ -169,6 +175,8 @@ private:
     int zoomPercent = 100;           // 50 / 75 / 100 / 125 / 150 / 200
 
     float uiScale  = 1.0f;
+    float uiScaleX = 1.0f;          // 允许横向/纵向独立伸缩
+    float uiScaleY = 1.0f;
     float originX  = 0.0f;
     float originY  = 0.0f;
     juce::AffineTransform uiTransform;
@@ -180,6 +188,7 @@ private:
     int    language      = 0;              // 0 = Chinese, 1 = English
     int    fontIndex     = 0;
     int    colourIndex   = 0;
+    int    advanceMode   = 0;              // 0 = 逐句跳动, 1 = 逐字跳动
     int    currentIndex  = -2;
     float  transition    = 1.0f;
     float  displayIndex  = -1.0f;
@@ -191,6 +200,10 @@ private:
     bool   settingsOpen    = false;
     bool   aboutOpen       = false;
     bool   updatingCombos  = false;
+    bool   previewDragging = false;        // 在歌词区上下拖动预览
+    double previewOffset   = 0.0;
+    double previewDragStartOffset = 0.0;
+    int    previewDragStartY = 0;
     double demoTime        = 0.0;
     double lastTickMs      = 0.0;
 
@@ -211,6 +224,8 @@ private:
     juce::String lastWarning;
     juce::String fileDescription;
     juce::String archivedPath;
+    juce::String editShownText;            // 编辑框里显示的（去掉 <...> 的干净文本）
+    juce::String editOriginalText;         // 原始歌词（未改动时保留逐字锚点）
 
     juce::Image customBg;
 
@@ -239,7 +254,7 @@ private:
     juce::TextButton  demoClockToggle;
 
     // Settings panel widgets
-    juce::ComboBox    languageBox, zoomBox, skinBox, fontBox, colourBox;
+    juce::ComboBox    languageBox, zoomBox, skinBox, fontBox, colourBox, advanceBox;
     juce::TextButton  orientHButton, orientVButton;
     juce::TextButton  pickImageButton, clearImageButton;
 
