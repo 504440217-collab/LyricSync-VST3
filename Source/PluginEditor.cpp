@@ -1796,7 +1796,7 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
                 const double diff = tapTimes[(size_t) shown] - displayTime;
 
                 sub = formatTimecode (tapTimes[(size_t) shown]) + "   "
-                    + (diff >= 0.0 ? tr (Lang::TextId::tapNextLineIn)
+                    + (diff >= 0.0 ? tr (Lang::TextId::nextLineIn)
                                      + juce::String (diff, 1)
                                    : tr (Lang::TextId::tapArmAhead)
                                      + juce::String (-diff, 1)
