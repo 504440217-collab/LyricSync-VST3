@@ -141,6 +141,8 @@ private:
     void timerCallback() override;
     void buttonClicked (juce::Button* button) override;
     void sliderValueChanged (juce::Slider* slider) override;
+    juce::Point<float> toLogicalPoint (juce::Point<float> physical) const;
+    void seekStandaloneAt (juce::Point<float> logical);
     void comboBoxChanged (juce::ComboBox* box) override;
 
     //---- Painting -----------------------------------------------------------
@@ -150,6 +152,7 @@ private:
     void paintSettings (juce::Graphics& g, juce::Rectangle<float> panel);
     void paintAbout    (juce::Graphics& g, juce::Rectangle<float> panel);
     void paintSearch   (juce::Graphics& g, juce::Rectangle<float> panel);
+    void paintStandaloneTransport (juce::Graphics& g);
     void paintInfoLine (juce::Graphics& g);
     void drawText    (juce::Graphics& g, juce::Rectangle<float> area,
                       const juce::String& text, float size, juce::Colour colour,
@@ -336,6 +339,11 @@ private:
     std::vector<double> offsetHistory;       // 「设起点 / 偏移」的撤销栈
 
     //---- 在线搜歌词 ---------------------------------------------------------
+    //---- Standalone 独立版走带 ----------------------------------------------
+    bool   standaloneMode = false;          // 运行时检测：只有独立版显示走带控件
+    bool   standaloneSeekDragging = false;
+    juce::Rectangle<float> standaloneSeekBar;  // 逻辑坐标，自绘进度条热区
+
     bool   searchOpen  = false;
     bool   searchBusy  = false;
     juce::String searchStatus;
@@ -432,6 +440,7 @@ private:
     juce::TextEditor  styleNoteEditor;
 
     juce::TextButton  onlineLyricsButton;
+    juce::TextButton  standalonePlayButton;   // 仅独立版：播放 / 暂停
     juce::TextButton  searchGoButton, searchLoadButton, searchLxButton;
     juce::TextEditor  lxUrlEditor;
     juce::TextButton  simplifyToggle;

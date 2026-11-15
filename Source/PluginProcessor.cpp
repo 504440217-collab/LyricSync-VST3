@@ -72,7 +72,12 @@ void LyricSyncProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
 {
     // 音频直通：一个采样都不动，宿主给什么就还什么。
     juce::ignoreUnused (midi);
-    readHostTime();
+
+    if (standaloneTransport.load())
+        tickStandaloneClock (buffer.getNumSamples());
+    else
+        readHostTime();
+
     updateAudioRange (buffer);
 
     if (isPlaying.load())
@@ -83,11 +88,36 @@ void LyricSyncProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer,
 {
     // 即使宿主把插件旁路，也要继续读取播放头，歌词才不会停住。
     juce::ignoreUnused (midi);
-    readHostTime();
+
+    if (standaloneTransport.load())
+        tickStandaloneClock (buffer.getNumSamples());
+    else
+        readHostTime();
+
     updateAudioRange (buffer);
 
     if (isPlaying.load())
         tempo.pushBlock (buffer);
+}
+
+/** 独立版的内置时钟：只在音频线程调用，GUI 通过原子量传「播放/暂停/定位」。 */
+void LyricSyncProcessor::tickStandaloneClock (int numSamples)
+{
+    const double sr = hostSampleRate.load();
+
+    const double requested = standaloneSeekRequest.exchange (-1.0);
+    if (requested >= 0.0)
+        standaloneClock = requested;
+
+    const bool playing = standalonePlaying.load();
+    if (playing && sr > 0.0)
+        standaloneClock += static_cast<double> (numSamples) / sr;
+
+    positionSeconds.store (standaloneClock);
+    timeInSamples.store (static_cast<juce::int64> (standaloneClock * sr));
+    isPlaying.store (playing);
+    hasHostTime.store (true);
+    timeUpdates.fetch_add (1, std::memory_order_relaxed);
 }
 
 //------------------------------------------------------------------------------

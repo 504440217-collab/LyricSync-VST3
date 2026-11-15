@@ -138,6 +138,29 @@ public:
     std::atomic<bool>        hasHostTime    { false };
     std::atomic<juce::uint32> timeUpdates  { 0 };
 
+    //---- Standalone 独立版走带（VST3 里不会被启用） ------------------------
+    //  独立版没有宿主时间轴，JUCE 自带的假播放头只会一直往前跑、无法暂停或定位。
+    //  所以独立版改用这个内置时钟：音频回调按样本数推进，GUI 按下暂停/拖动
+    //  进度条时通过原子量传令，完全不碰音频线程里的分配与锁。
+    std::atomic<bool>   standaloneTransport  { false };
+    std::atomic<bool>   standalonePlaying    { true  };
+    std::atomic<double> standaloneSeekRequest { -1.0 };
+
+    void enableStandaloneTransport() noexcept
+    {
+        // 从宿主假播放头当前位置接上，切换瞬间不会往回跳
+        standaloneSeekRequest.store (juce::jmax (0.0, positionSeconds.load()));
+        standaloneTransport.store (true);
+    }
+    void setStandalonePlaying (bool shouldPlay) noexcept
+    {
+        standalonePlaying.store (shouldPlay);
+    }
+    void seekStandalone (double seconds) noexcept
+    {
+        standaloneSeekRequest.store (juce::jmax (0.0, seconds));
+    }
+
     //---- 音频长度测量（音频线程写，GUI 线程读） ------------------------------
     //  插件作为插入效果收到的是这条轨道（或总线）的真实音频，因此可以在
     //  音频线程里用"非静音区间"的起点/终点还原歌曲的实际长度：
@@ -183,7 +206,10 @@ private:
     std::atomic<bool> stateReloadPending { false };
 
     void readHostTime();
+    void tickStandaloneClock (int numSamples);
     void updateAudioRange (const juce::AudioBuffer<float>& buffer);
+
+    double standaloneClock = 0.0;   // 只在音频线程读写
 
     TempoTracker tempo;
 

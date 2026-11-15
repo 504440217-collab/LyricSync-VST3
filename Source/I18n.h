@@ -270,7 +270,10 @@ namespace Lang
         setSimplify,
         onlineSimplifyOn,
         onlineSimplifyOff,
-        onlineSimplifyHint
+        onlineSimplifyHint,
+        standalonePlay,
+        standalonePause,
+        tipStandalone
     };
 
     /** Decode a UTF-8 byte literal into a real juce::String. */

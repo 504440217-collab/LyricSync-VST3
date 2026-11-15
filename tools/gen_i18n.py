@@ -372,6 +372,12 @@ TABLE = [
     ("onlineSimplifyOff","繁转简：关", "To Simplified: OFF"),
     ("onlineSimplifyHint","在线获取的歌词自动把繁体转成简体；想保留粤语原词可关掉",
                        "Automatically convert traditional Chinese to simplified; turn off to keep original Cantonese text"),
+
+    #--- 独立版走带 -----------------------------------------------------------
+    ("standalonePlay",  "播放", "Play"),
+    ("standalonePause", "暂停", "Pause"),
+    ("tipStandalone",   "独立版专用：暂停 / 继续播放歌词；点右边的进度条可拖到任意位置",
+                        "Standalone only: pause / resume; click or drag the progress bar to seek"),
 ]
 
 DEMO_ZH = """[ti:LyricSync 演示歌词]

@@ -2,6 +2,7 @@
 #include "DemoLyrics.h"
 
 #include <juce_core/juce_core.h>   // FileOutputStream：导出 LRC 时显式按 UTF-8 写
+#include <juce_events/juce_events.h>   // JUCEApplicationBase：运行时判断是否为独立版
 
 #include <cmath>
 #include <string>
@@ -13,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.9.1";
+    const char* const kVersion = "1.9.2";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -477,6 +478,14 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     setOpaque (true);
     setWantsKeyboardFocus (true);
 
+    // 独立版（Standalone）没有宿主时间轴，JUCE 自带的假播放头只会一直往前跑。
+    // 用 JUCEApplicationBase 运行时判断（VST3 里为 false），启用内置时钟与走带控件。
+    standaloneMode = juce::JUCEApplicationBase::isStandaloneApp()
+                  || juce::JUCEApplicationBase::getInstance() != nullptr;
+
+    if (standaloneMode)
+        processor.enableStandaloneTransport();
+
     // 全局默认值先铺一遍，工程状态恢复后会覆盖它（见 syncControlsFromSettings）。
     loadUiPrefs();
     syncControlsFromSettings();
@@ -503,7 +512,7 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
                      &setStartButton, &undoSetStartButton, &annotateButton,
                      &styleApplyButton, &styleClearButton, &styleCancelButton,
                      &onlineLyricsButton, &searchGoButton, &searchLoadButton,
-                     &searchLxButton, &simplifyToggle })
+                     &searchLxButton, &simplifyToggle, &standalonePlayButton })
     {
         b->addListener (this);
         addAndMakeVisible (*b);
@@ -847,6 +856,9 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     annotateButton   .setButtonText (tr (annotateMode ? Lang::TextId::tapFinish
                                                       : Lang::TextId::annotate));
     onlineLyricsButton.setButtonText (tr (Lang::TextId::onlineLyrics));
+    standalonePlayButton.setButtonText (tr (processor.standalonePlaying.load()
+                                                ? Lang::TextId::standalonePause
+                                                : Lang::TextId::standalonePlay));
     searchGoButton    .setButtonText (tr (Lang::TextId::onlineSearch));
     searchLoadButton  .setButtonText (tr (Lang::TextId::onlineLoad));
     searchLxButton    .setButtonText (tr (Lang::TextId::onlineLx));
@@ -952,6 +964,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     undoSetStartButton.setTooltip (tr (Lang::TextId::tipUndoSetStart));
     annotateButton  .setTooltip (tr (Lang::TextId::tipAnnotate));
     onlineLyricsButton.setTooltip (tr (Lang::TextId::tipOnline));
+    standalonePlayButton.setTooltip (tr (Lang::TextId::tipStandalone));
     closeSearchButton .setTooltip (tr (Lang::TextId::tipClose));
     customUrlEditor   .setTooltip (tr (Lang::TextId::onlineUrlHint));
     lxUrlEditor       .setTooltip (tr (Lang::TextId::lxUrlHint));
@@ -1018,6 +1031,9 @@ void LyricSyncEditor::refreshLookAndFeel()
     closeSettingsButton.hoverColour  = palette.text;
     closeAboutButton.normalColour = palette.dim;
     closeAboutButton.hoverColour  = palette.text;
+    // 搜索面板是浅色/白色底：X 不能再用默认的白色，否则浅色皮肤里几乎看不见
+    closeSearchButton.normalColour = palette.text;
+    closeSearchButton.hoverColour  = palette.accent;
 
     orientHButton.setToggleState (orientation == Orientation::horizontal,
                                   juce::dontSendNotification);
@@ -1071,6 +1087,7 @@ void LyricSyncEditor::updateVisibility()
     setStartButton   .setVisible (normal);
     undoSetStartButton.setVisible (normal);
     annotateButton   .setVisible (normal);
+    standalonePlayButton.setVisible (normal && standaloneMode);
 
     // 样式卡片
     const bool styleEdit = annotateMode && ! overlay && styleEditIndex >= 0;
@@ -1331,6 +1348,8 @@ void LyricSyncEditor::resized()
             x += 14.0f;
             place (fontLabel, 34);
             fontSlider.setBounds (scaledRect (x, 486, 100, 22));
+            standalonePlayButton.setBounds (scaledRect (742, 482, 56, 30));
+            standaloneSeekBar = { 806.0f, 482.0f, 146.0f, 30.0f };
             measureButton.setBounds (scaledRect (682, 538, 110, 26));
             exportButton .setBounds (scaledRect (800, 538, 138, 26));
         }
@@ -1386,6 +1405,8 @@ void LyricSyncEditor::resized()
             fontSlider  .setBounds (scaledRect (ox + 426, 686, 140, 22));
 
             measureButton.setBounds (scaledRect (ox + 22, 720, 176, 30));
+            standalonePlayButton.setBounds (scaledRect (ox + 206, 720, 88, 30));
+            standaloneSeekBar = { ox + 300.0f, 720.0f, 266.0f, 30.0f };
         }
 
         setStartButton   .setBounds (scaledRect (ox + 22, 756, 176, 28));
@@ -1583,6 +1604,9 @@ void LyricSyncEditor::paint (juce::Graphics& g)
                   palette.faint.withAlpha (0.45f), false);
     else
         paintInfoLine (g);
+
+    if (standaloneMode)
+        paintStandaloneTransport (g);
 
     if (settingsOpen)
         paintSettings (g, settingsPanelArea());
@@ -2557,6 +2581,67 @@ void LyricSyncEditor::paintSearch (juce::Graphics& g, juce::Rectangle<float> pan
               -1, {}, 1.0f, juce::Justification::centredLeft);
 }
 
+juce::Point<float> LyricSyncEditor::toLogicalPoint (juce::Point<float> physical) const
+{
+    return { (physical.x - originX) / juce::jmax (0.01f, uiScaleX),
+             (physical.y - originY) / juce::jmax (0.01f, uiScaleY) };
+}
+
+void LyricSyncEditor::seekStandaloneAt (juce::Point<float> logical)
+{
+    if (standaloneSeekBar.isEmpty())
+        return;
+
+    const double t01 = juce::jlimit (0.0, 1.0,
+        static_cast<double> ((logical.x - standaloneSeekBar.getX())
+                             / standaloneSeekBar.getWidth()));
+    const auto range = audioRange();
+    const double target = range.getStart() + t01 * juce::jmax (1.0, range.getLength());
+
+    previewOffset = 0.0;
+    // displayTime = 播放位置 + 偏移，所以定位时要把偏移减掉
+    processor.seekStandalone (juce::jmax (0.0, target - offsetMs / 1000.0));
+    repaint();
+}
+
+/** 独立版专属：跟随内置时钟的播放进度条（可点、可拖）。 */
+void LyricSyncEditor::paintStandaloneTransport (juce::Graphics& g)
+{
+    if (! standaloneMode || zenMode || editing || tapMode || standaloneSeekBar.isEmpty())
+        return;
+
+    const auto r = standaloneSeekBar;
+    const auto range = audioRange();
+    const double span = juce::jmax (1.0, range.getLength());
+    const double t01 = juce::jlimit (0.0, 1.0,
+                                     (displayTime - range.getStart()) / span);
+
+    const auto label = juce::Rectangle<float> (r.getX(), r.getY() - 1.0f,
+                                               r.getWidth(), 13.0f);
+    g.setColour (palette.dim);
+    g.setFont (uiFont (9.5f));
+    g.drawText (timecodeText (displayTime), label, juce::Justification::centredLeft, false);
+    g.drawText (timecodeText (range.getEnd()), label, juce::Justification::centredRight, false);
+
+    const auto track = juce::Rectangle<float> (r.getX(), r.getY() + 18.0f,
+                                               r.getWidth(), 6.0f);
+    g.setColour (palette.track);
+    g.fillRoundedRectangle (track, 3.0f);
+
+    const float filled = track.getWidth() * static_cast<float> (t01);
+
+    if (filled > 1.0f)
+    {
+        g.setColour (standaloneSeekDragging ? palette.accent
+                                            : palette.accent.withAlpha (0.85f));
+        g.fillRoundedRectangle (track.withWidth (filled), 3.0f);
+    }
+
+    const float cx = track.getX() + juce::jlimit (3.0f, track.getWidth() - 3.0f, filled);
+    g.setColour (palette.text);
+    g.fillEllipse (cx - 5.0f, track.getCentreY() - 5.0f, 10.0f, 10.0f);
+}
+
 void LyricSyncEditor::paintAbout (juce::Graphics& g, juce::Rectangle<float> panel)
 {
     g.setColour (juce::Colours::black.withAlpha (0.6f));
@@ -2759,6 +2844,17 @@ void LyricSyncEditor::timerCallback()
     else
     {
         tapFollowTime = -1.0;
+    }
+
+    // 独立版播放/暂停按钮文字跟着状态走（换语言、程序化改状态都不会脱节）
+    if (standaloneMode)
+    {
+        const auto want = tr (processor.standalonePlaying.load()
+                                  ? Lang::TextId::standalonePause
+                                  : Lang::TextId::standalonePlay);
+
+        if (standalonePlayButton.getButtonText() != want)
+            standalonePlayButton.setButtonText (want);
     }
 
     // 左下角提示每 6 秒换一条
@@ -2986,6 +3082,16 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
     if (button == &setStartButton)      { setLyricsStart(); return; }
     if (button == &undoSetStartButton)  { undoSetStart(); return; }
 
+    if (button == &standalonePlayButton)
+    {
+        const bool shouldPlay = ! processor.standalonePlaying.load();
+        processor.setStandalonePlaying (shouldPlay);
+        standalonePlayButton.setButtonText (tr (shouldPlay ? Lang::TextId::standalonePause
+                                                          : Lang::TextId::standalonePlay));
+        repaint();
+        return;
+    }
+
     if (button == &onlineLyricsButton) { showSearch (true); return; }
     if (button == &closeSearchButton)  { showSearch (false); return; }
     if (button == &searchGoButton)     { startSearch(); return; }
@@ -3130,6 +3236,17 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
         return juce::Point<float> ((p.x - originX) / juce::jmax (0.01f, uiScaleX),
                                    (p.y - originY) / juce::jmax (0.01f, uiScaleY));
     };
+
+    // 独立版播放进度条：按住即可拖动定位
+    if (standaloneMode && ! zenMode && ! editing && ! tapMode && ! annotateMode
+        && ! settingsOpen && ! aboutOpen && ! searchOpen
+        && e.eventComponent == this
+        && standaloneSeekBar.expanded (3.0f, 7.0f).contains (toLogicalPoint (e.position)))
+    {
+        standaloneSeekDragging = true;
+        seekStandaloneAt (toLogicalPoint (e.position));
+        return;
+    }
 
     if (aboutOpen)
     {
@@ -3309,6 +3426,12 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 
 void LyricSyncEditor::mouseDrag (const juce::MouseEvent& e)
 {
+    if (standaloneSeekDragging && e.eventComponent == this)
+    {
+        seekStandaloneAt (toLogicalPoint (e.position));
+        return;
+    }
+
     if (tapListDragging && e.eventComponent == this)
     {
         const auto area = stageArea();
@@ -3446,6 +3569,12 @@ void LyricSyncEditor::mouseWheelMove (const juce::MouseEvent& e,
 
 void LyricSyncEditor::mouseUp (const juce::MouseEvent&)
 {
+    if (standaloneSeekDragging)
+    {
+        standaloneSeekDragging = false;
+        repaint();
+    }
+
     if (tapListDragging)
     {
         tapListDragging = false;
@@ -3523,6 +3652,13 @@ void LyricSyncEditor::mouseMove (const juce::MouseEvent& e)
         // 歌词区里是 I 形文本选择光标，正好对应"拖选歌词"
         setMouseCursor (stageArea().contains (p) ? juce::MouseCursor::IBeamCursor
                                                   : juce::MouseCursor::NormalCursor);
+        return;
+    }
+
+    if (standaloneMode && ! editing && ! settingsOpen && ! aboutOpen && ! searchOpen
+        && standaloneSeekBar.expanded (3.0f, 7.0f).contains (toLogicalPoint (e.position)))
+    {
+        setMouseCursor (juce::MouseCursor::PointingHandCursor);
         return;
     }
 
@@ -4546,7 +4682,8 @@ void LyricSyncEditor::applyLineStyle()
     if (styleEditIndex < 0)
         return;
 
-    // 只有备注需要点「应用」；颜色在点色块时已经生效，这里保留原样
+    // 只有备注需要点「应用」；颜色在点色块时已经生效，这里保留原样。
+    // 一次框选了多句时，备注只写在第一句前面，后面几句不重复显示。
     const juce::String note = styleNoteEditor.getText().trim();
 
     const int lo = (annotateSelLo >= 0 ? annotateSelLo : styleEditIndex);
@@ -4557,8 +4694,9 @@ void LyricSyncEditor::applyLineStyle()
     {
         const auto it = lineStyles.find (i);
         const int colourIndex = (it == lineStyles.end()) ? -1 : it->second.colourIndex;
+        const juce::String lineNote = (i == lo) ? note : juce::String();
 
-        if (colourIndex < 0 && note.isEmpty())
+        if (colourIndex < 0 && lineNote.isEmpty())
         {
             lineStyles.erase (i);
         }
@@ -4566,7 +4704,7 @@ void LyricSyncEditor::applyLineStyle()
         {
             LineStyle st;
             st.colourIndex = colourIndex;
-            st.note = note;
+            st.note = lineNote;
             lineStyles[i] = st;
         }
     }
@@ -4658,7 +4796,23 @@ juce::String LyricSyncEditor::lineNoteFor (int index) const
 {
     const auto it = lineStyles.find (index);
 
-    return it == lineStyles.end() ? juce::String() : it->second.note;
+    if (it == lineStyles.end() || it->second.note.isEmpty())
+        return {};
+
+    // 以前的版本会把同一段备注写进选区里的每一句；这里做兼容处理：
+    // 相邻且「备注 + 颜色」都相同的一组句子，只在第一句前面显示备注。
+    if (index > 0)
+    {
+        const auto prev = lineStyles.find (index - 1);
+
+        if (prev != lineStyles.end()
+            && prev->second.note.isNotEmpty()
+            && prev->second.note == it->second.note
+            && prev->second.colourIndex == it->second.colourIndex)
+            return {};
+    }
+
+    return it->second.note;
 }
 
 void LyricSyncEditor::saveLineStyles()
