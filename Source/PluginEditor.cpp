@@ -3900,10 +3900,10 @@ void LyricSyncEditor::pickBackgroundImage()
         juce::File::getSpecialLocation (juce::File::userPicturesDirectory),
         "*.png;*.jpg;*.jpeg;*.bmp;*.webp");
 
-    const int flags = juce::FileBrowserComponent::openMode
-                    | juce::FileBrowserComponent::canSelectFiles;
+    const int imageFlags = juce::FileBrowserComponent::openMode
+                         | juce::FileBrowserComponent::canSelectFiles;
 
-    chooser->launchAsync (flags, [this] (const juce::FileChooser& fc)
+    chooser->launchAsync (imageFlags, [this] (const juce::FileChooser& fc)
     {
         auto file = fc.getResult();
 
