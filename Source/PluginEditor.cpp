@@ -1,6 +1,8 @@
 #include "PluginEditor.h"
 #include "DemoLyrics.h"
 
+#include <juce_core/juce_core.h>   // FileOutputStream：导出 LRC 时显式按 UTF-8 写
+
 #include <cmath>
 #include <string>
 
@@ -10,7 +12,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.8.3";
+    const char* const kVersion = "1.8.4";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -82,6 +84,10 @@ namespace
 
     const int kZoomSteps[] = { 50, 75, 100, 125, 150, 200 };
     const int kNumZoomSteps = static_cast<int> (sizeof (kZoomSteps) / sizeof (kZoomSteps[0]));
+
+    // 字号倍率：滑块、Ctrl+滚轮、全局偏好文件共用同一组上下限
+    constexpr double kFontScaleMin = 0.70;
+    constexpr double kFontScaleMax = 2.40;
 
     /** 纯 ASCII 手工拼时间码（不走 printf，避免任何格式化/编码意外）。 */
     juce::String formatTimecode (double seconds)
@@ -517,7 +523,7 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
         addAndMakeVisible (*box);
     }
 
-    fontSlider.setRange (0.70, 1.60, 0.01);
+    fontSlider.setRange (kFontScaleMin, kFontScaleMax, 0.01);
     fontSlider.setValue (fontScale, juce::dontSendNotification);
     fontSlider.addListener (this);
     addAndMakeVisible (fontSlider);
@@ -629,7 +635,7 @@ void LyricSyncEditor::loadUiPrefs()
         else if (key == "skin")        skinIndex   = value.getIntValue();
         else if (key == "font")        fontIndex   = value.getIntValue();
         else if (key == "colour")      colourIndex = value.getIntValue();
-        else if (key == "fontScale")   fontScale   = juce::jlimit (0.70, 1.60, value.getDoubleValue());
+        else if (key == "fontScale")   fontScale   = juce::jlimit (kFontScaleMin, kFontScaleMax, value.getDoubleValue());
         else if (key == "bg" && value.isNotEmpty())
         {
             const juce::File bgFile (value);
@@ -695,7 +701,8 @@ juce::Colour LyricSyncEditor::lyricColour() const
 void LyricSyncEditor::syncControlsFromSettings()
 {
     offsetMs  = static_cast<double> (processor.getSetting (Settings::offsetMs, 0.0));
-    fontScale = static_cast<double> (processor.getSetting (Settings::fontScale, 1.0));
+    fontScale = juce::jlimit (kFontScaleMin, kFontScaleMax,
+                   static_cast<double> (processor.getSetting (Settings::fontScale, 1.0)));
     language  = juce::jlimit (0, 1, static_cast<int> (processor.getSetting (Settings::language, 0)));
     // 「手动预览」入口已从主界面移除，内部模拟播放头不再启用，
     // 避免旧工程里残留的 demoClock 设置让插件一直停在预览模式。
@@ -1735,10 +1742,20 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
                 const auto lineTint = lineColourFor (i, currentTint);
                 const auto note = lineNoteFor (i);
 
+                // 逐字模式里，未唱的字原本固定用白色，导致单独着色的句子
+                // 只有"唱到的那几个字"变色，预览/未开唱时看不出改过色。
+                // 给这一句上过色时，未唱部分也用该颜色的浅一档，整句都看得出来。
+                const auto styleIt = lineStyles.find (i);
+                const bool hasLineTint = (styleIt != lineStyles.end()
+                                          && styleIt->second.colourIndex >= 0);
+                const auto unsungColour = hasLineTint
+                    ? lineTint.interpolatedWith (palette.text, 0.35f)
+                    : palette.text;
+
                 if (advanceMode == 1)
                 {
-                    // 逐字：未唱的字是白色，唱到的字由白渐变为该行颜色（字内渐变）
-                    drawText (g, lineRect, line.text, size, palette.text, true,
+                    // 逐字：未唱的字用底色，唱到的字渐变为该行颜色（字内渐变）
+                    drawText (g, lineRect, line.text, size, unsungColour, true,
                               sung, lineTint, fade, juce::Justification::centred, note);
                 }
                 else
@@ -3083,7 +3100,7 @@ void LyricSyncEditor::mouseWheelMove (const juce::MouseEvent& e,
     if (wheel.isReversed)
         step = -step;
 
-    const double next = juce::jlimit (0.70, 1.60, fontScale + step);
+    const double next = juce::jlimit (kFontScaleMin, kFontScaleMax, fontScale + step);
 
     if (std::abs (next - fontScale) < 1.0e-4)
         return;
@@ -4749,13 +4766,40 @@ void LyricSyncEditor::exitTapMode()
 //==============================================================================
 void LyricSyncEditor::exportLyrics()
 {
-    const auto body = processor.getSetting (Settings::lyricsText, "").toString();
+    const auto& doc = processor.lyrics();
 
-    if (body.trim().isEmpty())
+    if (doc.isEmpty())
     {
-        lastWarning = tr (Lang::TextId::emptyFile);
+        lastWarning = tr (Lang::TextId::exportEmpty);
         repaint();
         return;
+    }
+
+    // 不再把当初载入的原文照抄出去，而是按「当前状态」重新生成一份新 LRC：
+    //   · 歌词文字：取当前文档（粘贴/编辑、打轴行编辑后的最新内容）
+    //   · 时间码：取当前文档（打轴、重打、单行编辑后的最新时间）
+    //   · 提前/延后：歌词时间 = 宿主时间 + offset，所以导出的音频时间 = 歌词时间 - offset
+    // 这样导出的文件在任何播放器里都能直接对上音频，不依赖插件里的偏移设置。
+    const double shift = offsetMs / 1000.0;
+    const auto& info = doc.info();
+
+    juce::String lrc;
+
+    if (info.title.isNotEmpty())   lrc << "[ti:" << info.title  << "]\n";
+    if (info.artist.isNotEmpty())  lrc << "[ar:" << info.artist << "]\n";
+    if (info.album.isNotEmpty())   lrc << "[al:" << info.album  << "]\n";
+
+    for (int i = 0; i < doc.size(); ++i)
+    {
+        const auto& line = doc.line (i);
+        const double t = juce::jmax (0.0, line.time - shift);
+        const auto stamp = juce::String ("[") + formatStamp (t) + "]";
+
+        lrc << stamp << line.text << "\n";
+
+        // 双语歌词：译文另起一行，共用同一时间码
+        if (line.translation.isNotEmpty())
+            lrc << stamp << line.translation << "\n";
     }
 
     auto defaultFile = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
@@ -4768,7 +4812,7 @@ void LyricSyncEditor::exportLyrics()
                     | juce::FileBrowserComponent::canSelectFiles
                     | juce::FileBrowserComponent::warnAboutOverwriting;
 
-    chooser->launchAsync (flags, [this] (const juce::FileChooser& fc)
+    chooser->launchAsync (flags, [this, lrc] (const juce::FileChooser& fc)
     {
         auto file = fc.getResult();
 
@@ -4778,8 +4822,22 @@ void LyricSyncEditor::exportLyrics()
         if (file.getFileExtension().isEmpty())
             file = file.withFileExtension (".lrc");
 
-        const auto text = processor.getSetting (Settings::lyricsText, "").toString();
-        file.replaceWithText (text, false, false, "\r\n");
+        // 明确按 UTF-8 写出：replaceWithText 默认走系统编码，中文会变乱码
+        juce::FileOutputStream out (file);
+        bool ok = false;
+
+        if (out.openedOk())
+        {
+            out.setPosition (0);
+            out.truncate();
+            ok = out.write (lrc.toRawUTF8(),
+                            static_cast<size_t> (lrc.getNumBytesAsUTF8()));
+            out.flush();
+        }
+
+        lastWarning = ok ? tr (Lang::TextId::exportDone) + "  " + file.getFileName()
+                         : tr (Lang::TextId::exportFailed);
+        repaint();
     });
 }
 
