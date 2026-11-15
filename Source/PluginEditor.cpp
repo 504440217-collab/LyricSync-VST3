@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.7.6";
+    const char* const kVersion = "1.8.0";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -1719,6 +1719,10 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
     const int idx   = juce::jlimit (0, juce::jmax (0, total - 1), tapIndex);
     const bool v    = (orientation == Orientation::vertical);
 
+    // 预备重打时，界面展示的是"被预备的那一句"，而不是指针所指的下一句
+    const bool armed = (tapArmIndex >= 0 && tapArmIndex < total);
+    const int  shown = juce::jlimit (0, juce::jmax (0, total - 1), armed ? tapArmIndex : idx);
+
     g.setColour (palette.accent);
     g.setFont (uiFont (10.5f, true));
     g.drawText (tr (Lang::TextId::tapTitle),
@@ -1728,10 +1732,19 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
 
     g.setColour (palette.faint);
     g.setFont (uiFont (10.5f));
-    g.drawText (juce::String (juce::jmin (tapIndex + 1, total)) + " / " + juce::String (total),
+    g.drawText (juce::String (juce::jmin (shown + 1, total)) + " / " + juce::String (total),
                 static_cast<int> (area.getRight() - 160.0f),
                 static_cast<int> (area.getY() + 15.0f), 130, 16,
                 juce::Justification::centredRight);
+
+    if (armed)
+    {
+        drawText (g, juce::Rectangle<float> (area.getX() + 150.0f, area.getY() + 13.0f,
+                                             240.0f, 18.0f),
+                  tr (Lang::TextId::tapArmTitle) + "  #" + juce::String (tapArmIndex + 1),
+                  11.0f, palette.warn, true, -1.0f, {}, 1.0f,
+                  juce::Justification::centredLeft);
+    }
 
     const float refW = (v ? 520.0f : 900.0f);
     const float widthScale = juce::jlimit (0.80f, 1.70f, area.getWidth() / refW)
@@ -1753,30 +1766,57 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
     const float listBottom = rows.empty() ? area.getY() + 48.0f : rows.back().getBottom();
     const float centreY = v ? listBottom + 74.0f : area.getCentreY() - 8.0f;
 
-    if (! v && tapIndex > 0 && tapIndex - 1 < total)
+    if (! v && shown > 0 && shown - 1 < total)
     {
         drawText (g, juce::Rectangle<float> (cx, centreY - 96.0f, cw, 20.0f),
                   tr (Lang::TextId::tapPrev) + "  "
-                    + formatTimecode (tapTimes[(size_t) (tapIndex - 1)]),
+                    + (tapTimes[(size_t) (shown - 1)] >= 0.0
+                         ? formatTimecode (tapTimes[(size_t) (shown - 1)])
+                         : juce::String ("--:--.--")),
                   10.5f * widthScale, palette.faint, false);
 
         drawText (g, juce::Rectangle<float> (cx, centreY - 74.0f, cw, 30.0f),
-                  tapLines[(size_t) (tapIndex - 1)], 16.0f * widthScale,
+                  tapLines[(size_t) (shown - 1)], 16.0f * widthScale,
                   palette.dim, false);
     }
 
-    if (tapIndex < total)
+    if (armed || tapIndex < total)
     {
         drawText (g, juce::Rectangle<float> (cx, centreY - 24.0f, cw, 52.0f),
-                  tapLines[(size_t) idx], 30.0f * widthScale, lyricColour(), true);
+                  tapLines[(size_t) shown], 30.0f * widthScale,
+                  armed ? palette.warn : lyricColour(), true);
 
-        if (idx + 1 < total)
+        // 预备重打时，下面一行显示"这一句原时间 / 距现在多久"
+        if (armed)
+        {
+            juce::String sub;
+
+            if (tapTimes[(size_t) shown] >= 0.0)
+            {
+                const double diff = tapTimes[(size_t) shown] - displayTime;
+
+                sub = formatTimecode (tapTimes[(size_t) shown]) + "   "
+                    + (diff >= 0.0 ? tr (Lang::TextId::tapNextLineIn)
+                                     + juce::String (diff, 1)
+                                   : tr (Lang::TextId::tapArmAhead)
+                                     + juce::String (-diff, 1)
+                                     + tr (Lang::TextId::secondsSuffix));
+            }
+            else
+            {
+                sub = tr (Lang::TextId::tapArmHint);
+            }
+
+            drawText (g, juce::Rectangle<float> (cx, centreY + 34.0f, cw, 22.0f),
+                      sub, 11.5f * widthScale, palette.warn, false);
+        }
+        else if (shown + 1 < total)
         {
             drawText (g, juce::Rectangle<float> (cx, centreY + 36.0f, cw, 18.0f),
                       tr (Lang::TextId::tapNext), 10.5f * widthScale, palette.faint, false);
 
             drawText (g, juce::Rectangle<float> (cx, centreY + 54.0f, cw, 26.0f),
-                      tapLines[(size_t) (idx + 1)], 15.0f * widthScale,
+                      tapLines[(size_t) (shown + 1)], 15.0f * widthScale,
                       palette.dim.withAlpha (0.55f), false);
         }
     }
@@ -1808,22 +1848,54 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
             g.drawRoundedRectangle (r, 5.0f, 1.0f);
 
             auto ri = r.toNearestInt();
+            const auto armRect = tapRowArmButton (r);
+            const bool thisArmed = (tapArmIndex == li);
 
             g.setColour (palette.faint);
             g.setFont (uiFont (9.5f));
             g.drawText (juce::String (li + 1), ri.removeFromLeft (24),
                         juce::Justification::centredRight, false);
 
-            g.setColour (palette.accent);
+            g.setColour (thisArmed ? palette.warn : palette.accent);
             g.setFont (uiFont (10.5f, true));
             g.drawText (formatTimecode (tapTimes[(size_t) li]),
                         ri.removeFromLeft (92),
                         juce::Justification::centredLeft, false);
 
-            g.setColour (palette.dim);
+            g.setColour (thisArmed ? palette.text : palette.dim);
             g.setFont (uiFont (10.5f));
-            g.drawText (tapLines[(size_t) li], ri.withTrimmedLeft (6),
+            g.drawText (tapLines[(size_t) li],
+                        ri.withTrimmedLeft (6).withTrimmedRight (static_cast<int> (armRect.getWidth()) + 4),
                         juce::Justification::centredLeft, true);
+
+            // 右侧「重打这一句」：一个环形箭头，点了就进入预备状态
+            {
+                const auto af = armRect;
+                const float rr = juce::jmax (4.0f, af.getWidth() * 0.27f);
+
+                g.setColour (thisArmed ? palette.warn.withAlpha (0.22f)
+                                       : palette.text.withAlpha (0.07f));
+                g.fillEllipse (af);
+
+                juce::Path arc;
+                arc.addCentredArc (af.getCentreX(), af.getCentreY(), rr, rr,
+                                   0.0f, 0.75f, 5.55f, true);
+                g.setColour (thisArmed ? palette.warn : palette.accent.withAlpha (0.75f));
+                g.strokePath (arc, juce::PathStrokeType (1.3f,
+                                                         juce::PathStrokeType::curved,
+                                                         juce::PathStrokeType::rounded));
+
+                const float ax = af.getCentreX() + rr * std::cos (5.55f);
+                const float ay = af.getCentreY() + rr * std::sin (5.55f);
+
+                juce::Path head;
+                head.startNewSubPath (ax - 3.4f, ay - 2.2f);
+                head.lineTo (ax + 2.2f, ay - 0.2f);
+                head.lineTo (ax - 3.0f, ay + 2.6f);
+                g.strokePath (head, juce::PathStrokeType (1.3f,
+                                                          juce::PathStrokeType::curved,
+                                                          juce::PathStrokeType::rounded));
+            }
         }
     }
 
@@ -1857,12 +1929,31 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
     }
 
     //---- 底部提示 -------------------------------------------------------
-    drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 66.0f : 92.0f), cw, 20.0f),
-              tr (Lang::TextId::tapHint), 11.0f * widthScale, palette.dim, false);
+    if (armed)
+    {
+        const double at = tapTimes[(size_t) shown];
+        const juce::String seekHint = at >= 0.0
+            ? tr (Lang::TextId::tapArmSeek) + formatTimecode (juce::jmax (0.0, at - 3.0))
+              + tr (Lang::TextId::tapArmSeek2)
+            : tr (Lang::TextId::tapArmHint);
 
-    drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 44.0f : 68.0f), cw, 24.0f),
-              tr (Lang::TextId::tapWillStamp) + "  " + formatTimecode (displayTime),
-              (v ? 14.0f : 16.0f) * widthScale, palette.accent, true);
+        drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 66.0f : 92.0f), cw, 20.0f),
+                  seekHint, 11.0f * widthScale, palette.warn, false);
+
+        drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 44.0f : 68.0f), cw, 24.0f),
+                  tr (Lang::TextId::tapArmTitle) + "  #" + juce::String (shown + 1)
+                    + "   " + tr (Lang::TextId::tapHint) + "   (Esc)",
+                  (v ? 13.5f : 15.0f) * widthScale, palette.accent, true);
+    }
+    else
+    {
+        drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 66.0f : 92.0f), cw, 20.0f),
+                  tr (Lang::TextId::tapHint), 11.0f * widthScale, palette.dim, false);
+
+        drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 44.0f : 68.0f), cw, 24.0f),
+                  tr (Lang::TextId::tapWillStamp) + "  " + formatTimecode (displayTime),
+                  (v ? 14.0f : 16.0f) * widthScale, palette.accent, true);
+    }
 
     const bool paused = tapMode && demoMode && ! demoPlaying;
 
@@ -2123,6 +2214,12 @@ void LyricSyncEditor::timerCallback()
 
         if (tapHostTransportButton.getButtonText() != want)
             tapHostTransportButton.setButtonText (want);
+
+        const auto wantRestart = tr (tapArmIndex >= 0 ? Lang::TextId::tapUnarm
+                                                      : Lang::TextId::tapRestart);
+
+        if (tapRestartButton.getButtonText() != wantRestart)
+            tapRestartButton.setButtonText (wantRestart);
     }
     else
     {
@@ -2310,7 +2407,17 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
 
     if (button == &tapStartButton)      { enterTapMode(); return; }
     if (button == &tapUndoButton)       { undoStamp(); return; }
-    if (button == &tapRestartButton)    { restartTapLine (tapIndex); return; }
+    if (button == &tapRestartButton)
+    {
+        if (tapArmIndex >= 0)
+        {
+            cancelArm();
+            return;
+        }
+
+        armTapLine (juce::jmin (tapIndex, static_cast<int> (tapLines.size()) - 1));
+        return;
+    }
     if (button == &tapNudgeBackButton)  { nudgeTap (-10); return; }
     if (button == &tapNudgeFwdButton)   { nudgeTap (10); return; }
     if (button == &tapPauseButton)      { toggleTapPause(); return; }
@@ -2496,11 +2603,16 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 
         for (int i = 0; i < static_cast<int> (rows.size()); ++i)
         {
-            if (rows[(size_t) i].contains (p))
-            {
+            if (! rows[(size_t) i].contains (p))
+                continue;
+
+            // 点右侧的环形箭头 = 预备重打这一句；点行本身 = 编辑这一句
+            if (tapRowArmButton (rows[(size_t) i]).contains (p))
+                armTapLine (ids[(size_t) i]);
+            else
                 editTapRow (ids[(size_t) i]);
-                return;
-            }
+
+            return;
         }
 
         stampTap();
@@ -2654,6 +2766,12 @@ bool LyricSyncEditor::keyPressed (const juce::KeyPress& key)
         if (key.getTextCharacter() == 'p' || key.getTextCharacter() == 'P')
         {
             toggleTapPause();
+            return true;
+        }
+
+        if (key.getKeyCode() == juce::KeyPress::escapeKey && tapArmIndex >= 0)
+        {
+            cancelArm();
             return true;
         }
     }
@@ -3081,6 +3199,7 @@ void LyricSyncEditor::enterTapMode()
     tapLines = std::move (plain);
     tapTimes = std::move (times);
     tapEditIndex = -1;
+    tapArmIndex = -1;
     tapListScroll = 0;
     tapFollowTime = demoMode ? demoTime : displayTime;
 
@@ -3119,33 +3238,73 @@ void LyricSyncEditor::enterTapMode()
 
 void LyricSyncEditor::stampTap()
 {
-    if (! tapMode || tapLines.empty() || tapIndex >= static_cast<int> (tapLines.size()))
+    if (! tapMode || tapLines.empty())
         return;
 
-    double t = demoMode ? demoTime : displayTime;
+    // 用实时播放位置，而不是 30 Hz 刷新出来的 displayTime：
+    // 缓存值最多慢一帧（33 ms），打点会系统性偏晚。
+    double t = demoMode ? demoTime
+                        : processor.positionSeconds.load() + offsetMs / 1000.0;
+
     if (! std::isfinite (t) || t < 0.0)
         t = 0.0;
 
-    if (tapIndex > 0)
+    // 预备重打时只写被预备的那一句；否则写指针所指的下一句
+    const int target = tapArmIndex >= 0 ? tapArmIndex : tapIndex;
+
+    if (target < 0 || target >= static_cast<int> (tapLines.size()))
+        return;
+
+    if (target > 0)
     {
-        const double prev = tapTimes[(size_t) (tapIndex - 1)];
+        const double prev = tapTimes[(size_t) (target - 1)];
 
         // 暂停时时间码不再走，连点两次会得到同一个值 —— 直接忽略，避免打出假时间
-        if (t < prev + 0.10)
+        if (prev >= 0.0 && t < prev + 0.10)
         {
-            lastWarning = tr (Lang::TextId::tapTooClose);
+            lastWarning = tr (tapArmIndex >= 0 ? Lang::TextId::tapArmTooEarly
+                                               : Lang::TextId::tapTooClose);
             repaint();
             return;
         }
     }
 
-    tapTimes[(size_t) tapIndex] = t;
-    ++tapIndex;
+    // 预备重打时如果点晚了、越过了下一句，仍然记录（这是用户的判断），
+    // 但提示一下，方便接着用 −10 ms 或编辑卡修正。
+    bool late = false;
 
-    if (tapIndex >= static_cast<int> (tapLines.size()))
-        finishTapMode();
+    if (tapArmIndex >= 0 && target + 1 < static_cast<int> (tapLines.size()))
+    {
+        const double next = tapTimes[(size_t) (target + 1)];
+
+        if (next >= 0.0 && t > next - 0.05)
+            late = true;
+    }
+
+    tapTimes[(size_t) target] = t;
+
+    if (tapArmIndex >= 0)
+    {
+        tapArmIndex = -1;
+        tapIndex = juce::jmin (target + 1, static_cast<int> (tapLines.size()));
+        tapListScroll = 0;
+        lastWarning = tr (Lang::TextId::tapArmDone) + juce::String (target + 1);
+    }
     else
-        repaint();
+    {
+        ++tapIndex;
+
+        if (tapIndex >= static_cast<int> (tapLines.size()))
+        {
+            finishTapMode();
+            return;
+        }
+    }
+
+    if (late)
+        lastWarning = tr (Lang::TextId::tapTimeOrder) + "  (" + formatTimecode (t) + ")";
+
+    repaint();
 }
 
 void LyricSyncEditor::undoStamp()
@@ -3158,35 +3317,80 @@ void LyricSyncEditor::undoStamp()
     repaint();
 }
 
-void LyricSyncEditor::restartTapLine (int index)
+void LyricSyncEditor::armTapLine (int index)
 {
     if (! tapMode || tapLines.empty())
         return;
 
     index = juce::jlimit (0, static_cast<int> (tapLines.size()) - 1, index);
 
-    for (int i = index; i < static_cast<int> (tapTimes.size()); ++i)
-        tapTimes[(size_t) i] = -1.0;
+    tapArmIndex = index;
+    tapEditIndex = -1;
 
-    tapIndex = index;
-    lastWarning = demoMode ? tr (Lang::TextId::tapPausedWarn)
-                           : tr (Lang::TextId::tapHostRewind);
+    // 让被预备的那一句出现在列表里
+    {
+        std::vector<int> ids;
 
-    // 手动预览下直接把播放头拨回上一句结束处，并停住，等用户点「继续」
+        for (int i = 0; i < static_cast<int> (tapTimes.size()); ++i)
+            if (tapTimes[(size_t) i] >= 0.0)
+                ids.push_back (i);
+
+        const bool v = (orientation == Orientation::vertical);
+        const int  maxRows = v ? 4 : 7;
+        const int  n = static_cast<int> (ids.size());
+
+        tapListScroll = 0;
+
+        for (int p = 0; p < n; ++p)
+        {
+            if (ids[(size_t) p] == index)
+            {
+                if (p < n - maxRows)
+                    tapListScroll = n - maxRows - p;
+
+                break;
+            }
+        }
+    }
+
+    // 手动预览：可以真的倒回 3 秒并停住，按播放就能顺着唱到这一句
     if (demoMode)
     {
-        const double from = (index > 0 && tapTimes[(size_t) (index - 1)] >= 0.0)
-                              ? tapTimes[(size_t) (index - 1)]
-                              : audioRange().getStart();
+        const auto range = audioRange();
 
-        demoTime = juce::jlimit (audioRange().getStart(), audioRange().getEnd(), from);
+        double at = tapTimes[(size_t) index];
+
+        if (at < 0.0)
+            at = (index > 0 && tapTimes[(size_t) (index - 1)] >= 0.0)
+                   ? tapTimes[(size_t) (index - 1)] + 3.0
+                   : range.getStart();
+
+        demoTime = juce::jlimit (range.getStart(), range.getEnd(),
+                                 juce::jmax (range.getStart(), at - 3.0));
         demoPlaying = false;
+        lastWarning = tr (Lang::TextId::tapArmDemo);
+    }
+    else
+    {
+        lastWarning = {};
     }
 
     if (tapPauseButton.isVisible())
         tapPauseButton.setButtonText (tr (Lang::TextId::tapResume));
 
     repaint();
+}
+
+void LyricSyncEditor::cancelArm()
+{
+    tapArmIndex = -1;
+    lastWarning = tr (Lang::TextId::tapArmCancel);
+    repaint();
+}
+
+juce::Rectangle<float> LyricSyncEditor::tapRowArmButton (juce::Rectangle<float> row) const
+{
+    return row.removeFromRight (row.getHeight()).reduced (2.0f);
 }
 
 
@@ -3231,6 +3435,7 @@ void LyricSyncEditor::editTapRow (int index)
     index = juce::jlimit (0, static_cast<int> (tapLines.size()) - 1, index);
 
     tapEditIndex = index;
+    tapArmIndex = -1;
 
     tapTextEditor.setText (tapLines[(size_t) index], false);
     tapTimeEditor.setText (tapTimes[(size_t) index] >= 0.0
@@ -3624,6 +3829,7 @@ void LyricSyncEditor::finishTapMode()
     tapTimes.clear();
     tapIndex = 0;
     tapEditIndex = -1;
+    tapArmIndex = -1;
     demoPlaying = false;
 
     // 不走 loadLyricsText()：它会把 offset 归零，而打轴时间已含当前 offset。
@@ -3651,6 +3857,7 @@ void LyricSyncEditor::exitTapMode()
     tapTimes.clear();
     tapIndex = 0;
     tapEditIndex = -1;
+    tapArmIndex = -1;
     demoPlaying = false;
 
     updateVisibility();
