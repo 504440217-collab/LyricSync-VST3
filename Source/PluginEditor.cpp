@@ -3279,10 +3279,10 @@ void LyricSyncEditor::openFileDialog()
         juce::File::getSpecialLocation (juce::File::userHomeDirectory),
         "*.lrc;*.krc;*.txt;*.srt;*.vtt;*.doc;*.docx");
 
-    const int flags = juce::FileBrowserComponent::openMode
-                    | juce::FileBrowserComponent::canSelectFiles;
+    const int browserFlags = juce::FileBrowserComponent::openMode
+                           | juce::FileBrowserComponent::canSelectFiles;
 
-    chooser->launchAsync (flags, [this] (const juce::FileChooser& fc)
+    chooser->launchAsync (browserFlags, [this] (const juce::FileChooser& fc)
     {
         auto file = fc.getResult();
         if (file.existsAsFile())
@@ -3899,11 +3899,11 @@ void LyricSyncEditor::loadLineStyles()
         if (bar >= 0)
         {
             const auto b64 = rest.substring (bar + 1);
-            juce::MemoryBlock mb;
+            juce::MemoryOutputStream mo;
 
-            if (juce::Base64::convertFromBase64 (mb, b64) && mb.getSize() > 0)
-                st.note = juce::String::fromUTF8 (static_cast<const char*> (mb.getData()),
-                                                  static_cast<int> (mb.getSize()));
+            if (juce::Base64::convertFromBase64 (mo, b64) && mo.getDataSize() > 0)
+                st.note = juce::String::fromUTF8 (static_cast<const char*> (mo.getData()),
+                                                  static_cast<int> (mo.getDataSize()));
         }
 
         lineStyles[index] = st;
