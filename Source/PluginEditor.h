@@ -80,6 +80,7 @@ public:
     ~LyricSyncEditor() override;
 
     void paint (juce::Graphics& g) override;
+    void paintOverChildren (juce::Graphics& g) override;   // 刷子图标画在按钮文字之上
     void resized() override;
 
     void mouseDown (const juce::MouseEvent& e) override;
@@ -180,17 +181,17 @@ private:
     void setLyricsStart();                // 把当前播放位置设为歌词起点
     void undoSetStart();                  // 撤销上一次起点调整
 
-    void enterAnnotateMode();             // 进入"着色与备注"模式
+    void enterAnnotateMode();             // 进入"着色与备注"模式（就地选择，不切界面）
     void exitAnnotateMode();
-    void openLineStyle (int index);       // 打开某一句的样式编辑
+    void openLineStyle (int index);       // 右键后在鼠标旁打开小选择框
     void applyLineStyle();
     void clearLineStyle();
     void closeLineStyle();
-    void paintAnnotateStage (juce::Graphics& g, juce::Rectangle<float> area);
-    std::vector<juce::Rectangle<float>> annotateRows (juce::Rectangle<float> area) const;
+    void paintAnnotateOverlay (juce::Graphics& g, juce::Rectangle<float> area);
+    juce::Rectangle<float> stageLineRect (int index, juce::Rectangle<float> area) const;
+    int  stageLineAt (juce::Point<float> logicalPos) const;
     std::vector<juce::Rectangle<float>> styleSwatches (juce::Rectangle<float> card) const;
     juce::Rectangle<float> styleCard() const;
-    int  annotateFirstRow() const;
     void loadLineStyles();
     void saveLineStyles();
     juce::Colour lineColourFor (int index, juce::Colour fallback) const;
@@ -306,9 +307,14 @@ private:
     std::map<int, LineStyle> lineStyles;
 
     bool   annotateMode    = false;
-    int    styleEditIndex  = -1;             // >=0 表示正在编辑某一句的样式
+    int    styleEditIndex  = -1;             // >=0 表示小选择框已打开
     int    styleEditColour = -1;
-    int    annotateScroll  = 0;
+    int    annotateSelLo   = -1;             // 拖选范围（含），-1 = 未选
+    int    annotateSelHi   = -1;
+    int    annotateAnchor  = -1;             // 拖选起点
+    bool   annotateDragging = false;
+    float  annotateViewIndex = 0.0f;         // 着色模式下固定的歌词中心行
+    juce::Point<float> styleCardAnchor { 220.0f, 180.0f };   // 右键位置（逻辑坐标）
     std::vector<double> offsetHistory;       // 「设起点 / 偏移」的撤销栈
 
     bool   showHints       = true;         // 左下角轮播提示开关
