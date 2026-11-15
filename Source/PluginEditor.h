@@ -2,6 +2,7 @@
 
 #include "PluginProcessor.h"
 #include "KrcLyrics.h"
+#include "OnlineLyrics.h"
 #include "WordLyrics.h"
 #include "UiPalette.h"
 #include "I18n.h"
@@ -148,6 +149,7 @@ private:
     void paintTapStage (juce::Graphics& g, juce::Rectangle<float> area);
     void paintSettings (juce::Graphics& g, juce::Rectangle<float> panel);
     void paintAbout    (juce::Graphics& g, juce::Rectangle<float> panel);
+    void paintSearch   (juce::Graphics& g, juce::Rectangle<float> panel);
     void paintInfoLine (juce::Graphics& g);
     void drawText    (juce::Graphics& g, juce::Rectangle<float> area,
                       const juce::String& text, float size, juce::Colour colour,
@@ -161,6 +163,8 @@ private:
     juce::Rectangle<float> stageArea() const;
     juce::Rectangle<float> settingsPanelArea() const;
     juce::Rectangle<float> aboutPanelArea() const;
+    juce::Rectangle<float> searchPanelArea() const;
+    std::vector<juce::Rectangle<float>> searchResultRows (juce::Rectangle<float> panel) const;
     void updateScaledFonts();
     void applyWindowSize();
 
@@ -180,6 +184,14 @@ private:
     void undoStamp();
     void setLyricsStart();                // 把当前播放位置设为歌词起点
     void undoSetStart();                  // 撤销上一次起点调整
+
+    //---- 在线搜歌词 ---------------------------------------------------------
+    void showSearch (bool show);
+    void startSearch();
+    void searchFinished (OnlineLyrics::Outcome outcome);
+    void loadSelectedResult();
+    void downloadFinished (juce::String lrc, juce::String label);
+    void commitCustomUrl();
 
     void enterAnnotateMode();             // 进入"着色与备注"模式（就地选择，不切界面）
     void exitAnnotateMode();
@@ -321,6 +333,15 @@ private:
     juce::Point<float> styleCardAnchor { 220.0f, 180.0f };   // 右键位置（逻辑坐标）
     std::vector<double> offsetHistory;       // 「设起点 / 偏移」的撤销栈
 
+    //---- 在线搜歌词 ---------------------------------------------------------
+    bool   searchOpen  = false;
+    bool   searchBusy  = false;
+    juce::String searchStatus;
+    juce::String customSearchUrl;            // 全局偏好里保存的自定义服务地址
+    std::vector<OnlineLyrics::Result> searchResults;
+    int    searchSel    = -1;
+    int    searchScroll = 0;
+
     bool   showHints       = true;         // 左下角轮播提示开关
     int    hintIndex       = 0;
     double hintRotateMs    = 0.0;
@@ -405,6 +426,11 @@ private:
     juce::TextButton  annotateButton;
     juce::TextButton  styleApplyButton, styleClearButton, styleCancelButton;
     juce::TextEditor  styleNoteEditor;
+
+    juce::TextButton  onlineLyricsButton;
+    juce::TextButton  searchGoButton, searchLoadButton;
+    IconButton        closeSearchButton { IconButton::Icon::close };
+    juce::TextEditor  searchTitleEditor, searchArtistEditor, customUrlEditor;
 
     juce::TextButton  demoClockToggle;
 

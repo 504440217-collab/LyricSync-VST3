@@ -229,7 +229,31 @@ namespace Lang
         warnNoTimestamps1,
         warnNoTimestamps2,
         warnFirstLine1,
-        warnFirstLine2
+        warnFirstLine2,
+        onlineLyrics,
+        tipOnline,
+        onlineTitle,
+        onlineSong,
+        onlineArtist,
+        onlineSearch,
+        onlineSearching,
+        onlineNotFound,
+        onlineFound,
+        onlineEnterTitle,
+        onlineLoading,
+        onlineLoadFailed,
+        onlineLoad,
+        onlineLoaded,
+        onlineWordSync,
+        onlineNoResult,
+        onlineStartHint,
+        onlineSelectHint,
+        onlineSourceHint,
+        onlineSongPlaceholder,
+        onlineArtistPlaceholder,
+        onlineUrlPlaceholder,
+        setCustomUrl,
+        onlineUrlHint
     };
 
     /** Decode a UTF-8 byte literal into a real juce::String. */

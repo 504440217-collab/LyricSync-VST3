@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(LyricSync VERSION 1.8.4 LANGUAGES CXX)
+project(LyricSync VERSION 1.9.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -52,6 +52,7 @@ target_sources(LyricSync
         Source/PluginEditor.cpp
         Source/LyricsDocument.cpp
         Source/KrcLyrics.cpp
+        Source/OnlineLyrics.cpp
         Source/WordLyrics.cpp
         Source/I18n.cpp)
 

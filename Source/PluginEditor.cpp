@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <string>
+#include <thread>
 
 #if JUCE_WINDOWS
  #include <windows.h>
@@ -12,7 +13,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.8.4";
+    const char* const kVersion = "1.9.0";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -500,13 +501,15 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
                      &orientHButton, &orientVButton, &pickImageButton, &clearImageButton,
                      &hintToggle,
                      &setStartButton, &undoSetStartButton, &annotateButton,
-                     &styleApplyButton, &styleClearButton, &styleCancelButton })
+                     &styleApplyButton, &styleClearButton, &styleCancelButton,
+                     &onlineLyricsButton, &searchGoButton, &searchLoadButton })
     {
         b->addListener (this);
         addAndMakeVisible (*b);
     }
 
-    for (auto* b : { &gearButton, &logoButton, &closeSettingsButton, &closeAboutButton })
+    for (auto* b : { &gearButton, &logoButton, &closeSettingsButton, &closeAboutButton,
+                     &closeSearchButton })
     {
         b->addListener (this);
         addAndMakeVisible (*b);
@@ -566,6 +569,22 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     styleNoteEditor.onReturnKey = [this] { applyLineStyle(); };
     styleNoteEditor.onEscapeKey = [this] { closeLineStyle(); };
     addChildComponent (styleNoteEditor);
+
+    //---- 在线搜歌词的输入框（面板打开时才显示） -----------------------------
+    for (auto* ed : { &searchTitleEditor, &searchArtistEditor, &customUrlEditor })
+    {
+        ed->setMultiLine (false);
+        ed->setReturnKeyStartsNewLine (false);
+        ed->setScrollbarsShown (false);
+        ed->setJustification (juce::Justification::centredLeft);
+        ed->setPopupMenuEnabled (false);
+        addChildComponent (*ed);
+    }
+
+    searchTitleEditor.onReturnKey  = [this] { startSearch(); };
+    searchArtistEditor.onReturnKey = [this] { startSearch(); };
+    customUrlEditor.onReturnKey    = [this] { commitCustomUrl(); };
+    customUrlEditor.setText (customSearchUrl, false);
 
     tapTextEditor.setTextToShowWhenEmpty (tr (Lang::TextId::tapRowText), juce::Colours::grey);
     tapTimeEditor.setTextToShowWhenEmpty ("00:00.00", juce::Colours::grey);
@@ -636,6 +655,7 @@ void LyricSyncEditor::loadUiPrefs()
         else if (key == "font")        fontIndex   = value.getIntValue();
         else if (key == "colour")      colourIndex = value.getIntValue();
         else if (key == "fontScale")   fontScale   = juce::jlimit (kFontScaleMin, kFontScaleMax, value.getDoubleValue());
+        else if (key == "customUrl")   customSearchUrl = value;
         else if (key == "bg" && value.isNotEmpty())
         {
             const juce::File bgFile (value);
@@ -670,6 +690,7 @@ void LyricSyncEditor::saveUiPrefs()
     lines.add ("colour=" + juce::String (colourIndex));
     lines.add ("fontScale=" + juce::String (fontScale, 3));
     lines.add ("bg=" + customBgPath);
+    lines.add ("customUrl=" + customSearchUrl);
 
     f.replaceWithText (lines.joinIntoString ("\n"));
 }
@@ -815,6 +836,9 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     undoSetStartButton.setButtonText (tr (Lang::TextId::undoSetStart));
     annotateButton   .setButtonText (tr (annotateMode ? Lang::TextId::tapFinish
                                                       : Lang::TextId::annotate));
+    onlineLyricsButton.setButtonText (tr (Lang::TextId::onlineLyrics));
+    searchGoButton    .setButtonText (tr (Lang::TextId::onlineSearch));
+    searchLoadButton  .setButtonText (tr (Lang::TextId::onlineLoad));
     styleApplyButton .setButtonText (tr (Lang::TextId::annotateApplyNote));
     styleClearButton .setButtonText (tr (Lang::TextId::annotateClear));
     styleCancelButton.setButtonText (tr (Lang::TextId::cancel));
@@ -914,6 +938,9 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     setStartButton  .setTooltip (tr (Lang::TextId::tipSetStart));
     undoSetStartButton.setTooltip (tr (Lang::TextId::tipUndoSetStart));
     annotateButton  .setTooltip (tr (Lang::TextId::tipAnnotate));
+    onlineLyricsButton.setTooltip (tr (Lang::TextId::tipOnline));
+    closeSearchButton .setTooltip (tr (Lang::TextId::tipClose));
+    customUrlEditor   .setTooltip (tr (Lang::TextId::onlineUrlHint));
     hintLabel       .setTooltip (tr (Lang::TextId::hintClick));
 
     if (reloadDemoLyrics && usingDemoLyrics)
@@ -1000,7 +1027,7 @@ void LyricSyncEditor::updateVisibility()
         return;
     }
 
-    const bool overlay = settingsOpen || aboutOpen;
+    const bool overlay = settingsOpen || aboutOpen || searchOpen;
     // 着色是"就地"操作：主界面的按钮一个都不隐藏
     const bool normal  = ! editing && ! tapMode && ! overlay;
 
@@ -1015,7 +1042,8 @@ void LyricSyncEditor::updateVisibility()
                      static_cast<juce::Component*> (&measureButton),
                      static_cast<juce::Component*> (&exportButton),
                      static_cast<juce::Component*> (&retempoButton),
-                     static_cast<juce::Component*> (&gearButton) })
+                     static_cast<juce::Component*> (&gearButton),
+                     static_cast<juce::Component*> (&onlineLyricsButton) })
         c->setVisible (normal);
 
     // 已下线的「示例歌词」与「手动预览」：一律不显示
@@ -1081,6 +1109,16 @@ void LyricSyncEditor::updateVisibility()
     closeAboutButton.setVisible (aboutOpen);
     logoButton.setVisible (! overlay);
 
+    // 在线搜词面板
+    for (auto* c : { static_cast<juce::Component*> (&searchTitleEditor),
+                     static_cast<juce::Component*> (&searchArtistEditor),
+                     static_cast<juce::Component*> (&searchGoButton),
+                     static_cast<juce::Component*> (&searchLoadButton),
+                     static_cast<juce::Component*> (&closeSearchButton) })
+        c->setVisible (searchOpen);
+
+    customUrlEditor.setVisible (settingsOpen);
+
     clearImageButton.setEnabled (customBg.isValid());
 }
 
@@ -1108,9 +1146,10 @@ juce::Rectangle<float> LyricSyncEditor::stageArea() const
 juce::Rectangle<float> LyricSyncEditor::settingsPanelArea() const
 {
     if (orientation == Orientation::vertical)
-        return { juce::jmax (20.0f, (baseW() - 520.0f) * 0.5f), 150.0f, 520.0f, 540.0f };
+        return { juce::jmax (20.0f, (baseW() - 560.0f) * 0.5f), 120.0f, 560.0f, 560.0f };
 
-    return { 200.0f, 66.0f, 560.0f, 470.0f };
+    // 多一行「自定义服务地址」，面板相应加高
+    return { 200.0f, 30.0f, 560.0f, 540.0f };
 }
 
 juce::Rectangle<float> LyricSyncEditor::aboutPanelArea() const
@@ -1119,6 +1158,28 @@ juce::Rectangle<float> LyricSyncEditor::aboutPanelArea() const
         return { 44.0f, 210.0f, 512.0f, 460.0f };
 
     return { 230.0f, 120.0f, 500.0f, 370.0f };
+}
+
+juce::Rectangle<float> LyricSyncEditor::searchPanelArea() const
+{
+    if (orientation == Orientation::vertical)
+        return { juce::jmax (20.0f, (baseW() - 560.0f) * 0.5f), 140.0f, 560.0f, 540.0f };
+
+    return { 200.0f, 30.0f, 560.0f, 540.0f };
+}
+
+std::vector<juce::Rectangle<float>> LyricSyncEditor::searchResultRows (
+    juce::Rectangle<float> panel) const
+{
+    std::vector<juce::Rectangle<float>> rows;
+    const float x = panel.getX() + 24.0f;
+    const float y = panel.getY() + 200.0f;
+    const float w = panel.getWidth() - 48.0f;
+
+    for (int i = 0; i < 6; ++i)
+        rows.push_back ({ x, y + static_cast<float> (i) * 30.0f, w, 28.0f });
+
+    return rows;
 }
 
 void LyricSyncEditor::updateScaledFonts()
@@ -1134,6 +1195,15 @@ void LyricSyncEditor::updateScaledFonts()
     tapTextEditor.applyFontToAllText (uiFont (13.0f * uiScale));
     tapTimeEditor.applyFontToAllText (uiFont (13.0f * uiScale));
     styleNoteEditor.applyFontToAllText (uiFont (13.0f * uiScale));
+    for (auto* ed : { &searchTitleEditor, &searchArtistEditor, &customUrlEditor })
+        ed->applyFontToAllText (uiFont (12.0f * uiScale));
+
+    searchTitleEditor.setTextToShowWhenEmpty (tr (Lang::TextId::onlineSongPlaceholder),
+                                              palette.faint.withAlpha (0.6f));
+    searchArtistEditor.setTextToShowWhenEmpty (tr (Lang::TextId::onlineArtistPlaceholder),
+                                               palette.faint.withAlpha (0.6f));
+    customUrlEditor.setTextToShowWhenEmpty (tr (Lang::TextId::onlineUrlPlaceholder),
+                                            palette.faint.withAlpha (0.6f));
     styleNoteEditor.setTextToShowWhenEmpty (tr (Lang::TextId::annotateNotePlaceholder),
                                             palette.faint.withAlpha (0.6f));
 }
@@ -1250,6 +1320,7 @@ void LyricSyncEditor::resized()
 
         setStartButton   .setBounds (scaledRect (22, 568, 92, 26));
         undoSetStartButton.setBounds (scaledRect (122, 568, 68, 26));
+        onlineLyricsButton.setBounds (scaledRect (198, 568, 104, 26));
 
     }
     else
@@ -1297,6 +1368,7 @@ void LyricSyncEditor::resized()
 
         setStartButton   .setBounds (scaledRect (ox + 22, 756, 176, 28));
         undoSetStartButton.setBounds (scaledRect (ox + 206, 756, 176, 28));
+        onlineLyricsButton.setBounds (scaledRect (ox + 390, 756, 176, 28));
 
         fileLabel .setBounds (scaledRect (22, 794, baseW() - 44.0f, 22));
         hintLabel .setBounds (scaledRect (22, 818, baseW() - 44.0f, 20));
@@ -1347,6 +1419,23 @@ void LyricSyncEditor::resized()
         colourBox.setBounds (scaledRect (ctrlX, y, ctrlW, 28));  y += rowH;
         advanceBox.setBounds (scaledRect (ctrlX, y, ctrlW, 28)); y += rowH;
         hintToggle.setBounds (scaledRect (ctrlX, y, ctrlW * 0.4f, 28));
+        customUrlEditor.setBounds (scaledRect (ctrlX, y + rowH, ctrlW, 28));
+    }
+
+    //---- 在线搜词面板 -------------------------------------------------------
+    {
+        const auto panel = searchPanelArea();
+        const float x = panel.getX() + 24.0f;
+        const float w = panel.getWidth() - 48.0f;
+        const float ex = x + 66.0f;
+        const float ew = w - 66.0f;
+
+        closeSearchButton.setBounds (scaledRect (panel.getRight() - 46.0f,
+                                                 panel.getY() + 12.0f, 34.0f, 34.0f));
+        searchTitleEditor .setBounds (scaledRect (ex, panel.getY() + 76.0f, ew, 28.0f));
+        searchArtistEditor.setBounds (scaledRect (ex, panel.getY() + 116.0f, ew, 28.0f));
+        searchGoButton    .setBounds (scaledRect (x, panel.getY() + 156.0f, 110.0f, 28.0f));
+        searchLoadButton  .setBounds (scaledRect (x, panel.getY() + 442.0f, 150.0f, 30.0f));
     }
 
     //---- Tap row editor -----------------------------------------------------
@@ -1475,6 +1564,9 @@ void LyricSyncEditor::paint (juce::Graphics& g)
 
     if (aboutOpen)
         paintAbout (g, aboutPanelArea());
+
+    if (searchOpen)
+        paintSearch (g, searchPanelArea());
 }
 
 void LyricSyncEditor::paintOverChildren (juce::Graphics& g)
@@ -2280,7 +2372,8 @@ void LyricSyncEditor::paintSettings (juce::Graphics& g, juce::Rectangle<float> p
         Lang::TextId::setFont,
         Lang::TextId::setColor,
         Lang::TextId::setAdvance,
-        Lang::TextId::showHints
+        Lang::TextId::showHints,
+        Lang::TextId::setCustomUrl
     };
 
     for (auto id : labels)
@@ -2290,6 +2383,143 @@ void LyricSyncEditor::paintSettings (juce::Graphics& g, juce::Rectangle<float> p
                   juce::Justification::centredLeft);
         y += rowH;
     }
+}
+
+void LyricSyncEditor::paintSearch (juce::Graphics& g, juce::Rectangle<float> panel)
+{
+    g.setColour (juce::Colours::black.withAlpha (0.58f));
+    g.fillRect (juce::Rectangle<float> (0.0f, 0.0f, baseW(), baseH()));
+
+    g.setColour (palette.panel.withAlpha (0.97f));
+    g.fillRoundedRectangle (panel, 18.0f);
+    g.setColour (palette.panelEdge.withAlpha (0.7f));
+    g.drawRoundedRectangle (panel.reduced (0.5f), 18.0f, 1.0f);
+
+    const float x = panel.getX() + 24.0f;
+    const float w = panel.getWidth() - 48.0f;
+
+    drawText (g, juce::Rectangle<float> (x, panel.getY() + 16.0f, w - 60.0f, 28.0f),
+              tr (Lang::TextId::onlineTitle), 19.0f, palette.text, true, -1, {}, 1.0f,
+              juce::Justification::centredLeft);
+
+    g.setColour (palette.panelEdge.withAlpha (0.7f));
+    g.drawLine (x, panel.getY() + 62.0f, panel.getRight() - 24.0f,
+                panel.getY() + 62.0f, 1.0f);
+
+    drawText (g, juce::Rectangle<float> (x, panel.getY() + 78.0f, 60.0f, 24.0f),
+              tr (Lang::TextId::onlineSong), 12.5f, palette.dim, false, -1, {}, 1.0f,
+              juce::Justification::centredLeft);
+    drawText (g, juce::Rectangle<float> (x, panel.getY() + 118.0f, 60.0f, 24.0f),
+              tr (Lang::TextId::onlineArtist), 12.5f, palette.dim, false, -1, {}, 1.0f,
+              juce::Justification::centredLeft);
+
+    // 状态行
+    drawText (g, juce::Rectangle<float> (x + 122.0f, panel.getY() + 156.0f,
+                                         w - 122.0f, 28.0f),
+              searchStatus, 11.5f,
+              searchBusy ? palette.warn : palette.faint, false, -1, {}, 1.0f,
+              juce::Justification::centredLeft);
+
+    //---- 结果列表 -----------------------------------------------------------
+    const auto rows = searchResultRows (panel);
+    const int total = static_cast<int> (searchResults.size());
+    const int maxScroll = juce::jmax (0, total - static_cast<int> (rows.size()));
+    const int first = juce::jlimit (0, maxScroll, searchScroll);
+
+    if (total == 0)
+    {
+        g.setColour (palette.text.withAlpha (0.04f));
+        g.fillRoundedRectangle (juce::Rectangle<float> (x, panel.getY() + 200.0f,
+                                                        w, 180.0f), 8.0f);
+        drawText (g, juce::Rectangle<float> (x + 12.0f, panel.getY() + 200.0f,
+                                             w - 24.0f, 180.0f),
+                  tr (Lang::TextId::onlineNoResult), 12.0f, palette.faint, false,
+                  -1, {}, 1.0f, juce::Justification::centred);
+    }
+
+    for (int i = 0; i < static_cast<int> (rows.size()) && first + i < total; ++i)
+    {
+        const int idx = first + i;
+        const auto r = rows[(size_t) i];
+        const auto& res = searchResults[(size_t) idx];
+        const bool selected = (idx == searchSel);
+
+        g.setColour (selected ? palette.accent.withAlpha (0.18f)
+                              : palette.text.withAlpha (i % 2 == 0 ? 0.05f : 0.025f));
+        g.fillRoundedRectangle (r, 5.0f);
+
+        if (selected)
+        {
+            g.setColour (palette.accent.withAlpha (0.55f));
+            g.drawRoundedRectangle (r, 5.0f, 1.0f);
+        }
+
+        juce::String left = res.title;
+        if (res.artist.isNotEmpty())
+            left += juce::String ("  -  ") + res.artist;
+
+        drawText (g, juce::Rectangle<float> (r.getX() + 10.0f, r.getY(),
+                                             r.getWidth() - 150.0f, r.getHeight()),
+                  left, 12.0f, selected ? palette.accent : palette.text, selected,
+                  -1, {}, 1.0f, juce::Justification::centredLeft);
+
+        juce::String right = res.source;
+
+        if (res.wordSync)
+            right += juce::String ("  ") + tr (Lang::TextId::onlineWordSync);
+
+        if (res.durationSec > 0)
+            right += juce::String ("  ") + formatShort (static_cast<double> (res.durationSec));
+
+        drawText (g, juce::Rectangle<float> (r.getRight() - 140.0f, r.getY(),
+                                             130.0f, r.getHeight()),
+                  right, 10.0f, palette.dim, false, -1, {}, 1.0f,
+                  juce::Justification::centredRight);
+    }
+
+    // 结果列表右侧滚动条
+    if (total > static_cast<int> (rows.size()))
+    {
+        const float trackH = 180.0f;
+        const float trackY = panel.getY() + 200.0f;
+        const float thumbH = juce::jmax (20.0f, trackH * static_cast<float> (rows.size())
+                                                 / static_cast<float> (total));
+        const float t01 = static_cast<float> (first) / static_cast<float> (maxScroll);
+        const float ty = trackY + (trackH - thumbH) * t01;
+
+        g.setColour (palette.text.withAlpha (0.10f));
+        g.fillRoundedRectangle (panel.getRight() - 20.0f, trackY, 5.0f, trackH, 3.0f);
+        g.setColour (palette.accent.withAlpha (0.65f));
+        g.fillRoundedRectangle (panel.getRight() - 20.0f, ty, 5.0f, thumbH, 3.0f);
+    }
+
+    //---- 选中结果的预览 -----------------------------------------------------
+    const auto preview = juce::Rectangle<float> (x, panel.getY() + 386.0f, w, 46.0f);
+    g.setColour (palette.text.withAlpha (0.045f));
+    g.fillRoundedRectangle (preview, 8.0f);
+
+    if (searchSel >= 0 && searchSel < total)
+    {
+        const auto& res = searchResults[(size_t) searchSel];
+        juce::String text = res.preview;
+
+        if (text.isEmpty())
+            text = res.source + (res.wordSync
+                                 ? juce::String ("  /  ") + tr (Lang::TextId::onlineWordSync)
+                                 : juce::String());
+
+        drawText (g, preview.reduced (10.0f, 4.0f), text, 11.0f, palette.dim, false,
+                  -1, {}, 1.0f, juce::Justification::centredLeft);
+    }
+
+    drawText (g, juce::Rectangle<float> (x + 162.0f, panel.getY() + 442.0f,
+                                         w - 162.0f, 30.0f),
+              tr (Lang::TextId::onlineSelectHint), 10.5f, palette.faint, false,
+              -1, {}, 1.0f, juce::Justification::centredLeft);
+
+    drawText (g, juce::Rectangle<float> (x, panel.getY() + 486.0f, w, 18.0f),
+              tr (Lang::TextId::onlineSourceHint), 10.0f, palette.faint, false,
+              -1, {}, 1.0f, juce::Justification::centredLeft);
 }
 
 void LyricSyncEditor::paintAbout (juce::Graphics& g, juce::Rectangle<float> panel)
@@ -2720,6 +2950,11 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
     if (button == &setStartButton)      { setLyricsStart(); return; }
     if (button == &undoSetStartButton)  { undoSetStart(); return; }
 
+    if (button == &onlineLyricsButton) { showSearch (true); return; }
+    if (button == &closeSearchButton)  { showSearch (false); return; }
+    if (button == &searchGoButton)     { startSearch(); return; }
+    if (button == &searchLoadButton)   { loadSelectedResult(); return; }
+
     if (button == &annotateButton)
     {
         if (annotateMode) exitAnnotateMode();
@@ -2861,6 +3096,35 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
     {
         if (! settingsPanelArea().contains (toLogical (e.position)))
             showSettings (false);
+
+        return;
+    }
+
+    if (searchOpen)
+    {
+        const auto p = toLogical (e.position);
+        const auto panel = searchPanelArea();
+
+        if (! panel.contains (p))
+        {
+            showSearch (false);
+            return;
+        }
+
+        const auto rows = searchResultRows (panel);
+        const int total = static_cast<int> (searchResults.size());
+        const int maxScroll = juce::jmax (0, total - static_cast<int> (rows.size()));
+        const int first = juce::jlimit (0, maxScroll, searchScroll);
+
+        for (int i = 0; i < static_cast<int> (rows.size()) && first + i < total; ++i)
+        {
+            if (rows[(size_t) i].contains (p))
+            {
+                searchSel = first + i;
+                repaint();
+                return;
+            }
+        }
 
         return;
     }
@@ -3063,6 +3327,18 @@ void LyricSyncEditor::mouseWheelMove (const juce::MouseEvent& e,
     const auto mods = juce::ModifierKeys::currentModifiers;
     const bool mod = mods.isCtrlDown() || mods.isCommandDown();
 
+    // 在线搜词面板：滚轮翻结果列表
+    if (searchOpen && e.eventComponent == this
+        && searchPanelArea().transformedBy (uiTransform).contains (e.position))
+    {
+        const int total = static_cast<int> (searchResults.size());
+        const int maxScroll = juce::jmax (0, total - 6);
+        searchScroll = juce::jlimit (0, maxScroll,
+                                     searchScroll + (wheel.deltaY > 0.0f ? -1 : 1));
+        repaint();
+        return;
+    }
+
     // 着色模式：滚轮按"行"翻歌词，让每一句都能选中；视图不受播放头影响
     if (annotateMode && styleEditIndex < 0 && ! mod && e.eventComponent == this
         && stageArea().transformedBy (uiTransform).contains (e.position))
@@ -3222,6 +3498,7 @@ bool LyricSyncEditor::keyPressed (const juce::KeyPress& key)
             return true;
         }
 
+        if (searchOpen)   { showSearch (false); return true; }
         if (zenMode)      { toggleZenMode(); return true; }
         if (aboutOpen)    { showAbout (false); return true; }
         if (settingsOpen) { showSettings (false); return true; }
@@ -3271,6 +3548,144 @@ void LyricSyncEditor::showSettings (bool shouldShow)
     updateVisibility();
     resized();
     repaint();
+}
+
+//==============================================================================
+void LyricSyncEditor::showSearch (bool shouldShow)
+{
+    searchOpen = shouldShow;
+
+    if (searchOpen)
+    {
+        if (annotateMode)
+            exitAnnotateMode();
+
+        settingsOpen = false;
+        aboutOpen = false;
+        searchStatus = tr (Lang::TextId::onlineStartHint);
+        customUrlEditor.setText (customSearchUrl, false);
+    }
+
+    updateVisibility();
+    resized();
+    repaint();
+
+    if (searchOpen)
+        searchTitleEditor.grabKeyboardFocus();
+}
+
+void LyricSyncEditor::commitCustomUrl()
+{
+    customSearchUrl = customUrlEditor.getText().trim();
+    saveUiPrefs();
+}
+
+void LyricSyncEditor::startSearch()
+{
+    if (searchBusy)
+        return;
+
+    const auto title = searchTitleEditor.getText().trim();
+
+    if (title.isEmpty())
+    {
+        searchStatus = tr (Lang::TextId::onlineEnterTitle);
+        repaint();
+        return;
+    }
+
+    commitCustomUrl();
+
+    const auto artist = searchArtistEditor.getText().trim();
+    const int duration = audioTotalSeconds > 0.0
+                       ? static_cast<int> (audioTotalSeconds) : 0;
+    const auto url = customSearchUrl;
+
+    searchBusy = true;
+    searchResults.clear();
+    searchSel = -1;
+    searchScroll = 0;
+    searchStatus = tr (Lang::TextId::onlineSearching);
+    repaint();
+
+    // 网络请求全部在后台线程，回调只带结果数据，不触碰已销毁的编辑器
+    juce::Component::SafePointer<LyricSyncEditor> safe (this);
+
+    std::thread ([safe, title, artist, duration, url]()
+    {
+        auto outcome = OnlineLyrics::search (title, artist, duration, url);
+
+        juce::MessageManager::callAsync ([safe, outcome]()
+        {
+            if (auto* ed = safe.getComponent())
+                ed->searchFinished (outcome);
+        });
+    }).detach();
+}
+
+void LyricSyncEditor::searchFinished (OnlineLyrics::Outcome outcome)
+{
+    searchBusy = false;
+    searchResults = std::move (outcome.results);
+    searchSel = searchResults.empty() ? -1 : 0;
+    searchScroll = 0;
+
+    if (! searchResults.empty())
+    {
+        searchStatus = tr (Lang::TextId::onlineFound) + " "
+                     + juce::String (static_cast<int> (searchResults.size()))
+                     + "  |  " + outcome.via;
+    }
+    else if (outcome.error == "empty")
+    {
+        searchStatus = tr (Lang::TextId::onlineEnterTitle);
+    }
+    else
+    {
+        searchStatus = tr (Lang::TextId::onlineNotFound);
+    }
+
+    repaint();
+}
+
+void LyricSyncEditor::loadSelectedResult()
+{
+    if (searchBusy || searchSel < 0 || searchSel >= static_cast<int> (searchResults.size()))
+        return;
+
+    const auto result = searchResults[(size_t) searchSel];
+
+    searchBusy = true;
+    searchStatus = tr (Lang::TextId::onlineLoading);
+    repaint();
+
+    juce::Component::SafePointer<LyricSyncEditor> safe (this);
+
+    std::thread ([safe, result]()
+    {
+        const auto lrc = OnlineLyrics::download (result);
+
+        juce::MessageManager::callAsync ([safe, lrc, label = result.title]()
+        {
+            if (auto* ed = safe.getComponent())
+                ed->downloadFinished (lrc, label);
+        });
+    }).detach();
+}
+
+void LyricSyncEditor::downloadFinished (juce::String lrc, juce::String label)
+{
+    searchBusy = false;
+
+    if (lrc.trim().isEmpty())
+    {
+        searchStatus = tr (Lang::TextId::onlineLoadFailed);
+        repaint();
+        return;
+    }
+
+    showSearch (false);
+    loadLyricsText (lrc, tr (Lang::TextId::onlineLoaded) + "  " + label, false);
 }
 
 void LyricSyncEditor::showAbout (bool shouldShow)
