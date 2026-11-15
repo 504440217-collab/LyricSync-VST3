@@ -3540,6 +3540,11 @@ bool LyricSyncEditor::keyPressed (const juce::KeyPress& key)
 //==============================================================================
 void LyricSyncEditor::showSettings (bool shouldShow)
 {
+    // 关闭设置时把「自定义服务」输入框里的内容收下来，
+    // 避免用户没按回车就点面板外、随后打开搜索面板时输入被旧值覆盖。
+    if (! shouldShow)
+        commitCustomUrl();
+
     settingsOpen = shouldShow;
 
     if (settingsOpen)
@@ -3563,7 +3568,6 @@ void LyricSyncEditor::showSearch (bool shouldShow)
         settingsOpen = false;
         aboutOpen = false;
         searchStatus = tr (Lang::TextId::onlineStartHint);
-        customUrlEditor.setText (customSearchUrl, false);
     }
 
     updateVisibility();
