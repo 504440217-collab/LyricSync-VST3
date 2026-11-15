@@ -253,7 +253,24 @@ namespace Lang
         onlineArtistPlaceholder,
         onlineUrlPlaceholder,
         setCustomUrl,
-        onlineUrlHint
+        onlineUrlHint,
+        onlineExactHint,
+        onlinePartial,
+        onlinePartialTag,
+        onlineLinesSuffix,
+        onlineLx,
+        onlineLxLoading,
+        lxNoService,
+        lxNoLyric,
+        lxLoaded,
+        lxUrlHint,
+        lxButtonHint,
+        lxUrlPlaceholder,
+        setLxUrl,
+        setSimplify,
+        onlineSimplifyOn,
+        onlineSimplifyOff,
+        onlineSimplifyHint
     };
 
     /** Decode a UTF-8 byte literal into a real juce::String. */

@@ -6,6 +6,13 @@
 #include <string>
 #include <utility>
 
+#if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #include <windows.h>
+#endif
+
 namespace OnlineLyrics
 {
 namespace
@@ -15,7 +22,7 @@ namespace
         "Referer: https://www.kugou.com/\r\n";
 
     const char* const kLrclibHeaders =
-        "User-Agent: LyricSync/1.9.0 (local VST3 lyrics plugin)\r\n"
+        "User-Agent: LyricSync/1.9.1 (local VST3 lyrics plugin)\r\n"
         "Accept: application/json\r\n";
 
     /** 自己按 UTF-8 字节做 percent-encode，避免 JUCE addEscapeChars 的版本差异。 */
@@ -48,13 +55,14 @@ namespace
         return juce::String::fromUTF8 (out.c_str(), static_cast<int> (out.size()));
     }
 
-    juce::String httpGet (const juce::String& url, const juce::String& headers, int& status)
+    juce::String httpGet (const juce::String& url, const juce::String& headers,
+                          int& status, int timeoutMs = 7000)
     {
         status = 0;
 
         const auto options =
             juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
-                .withConnectionTimeoutMs (7000)
+                .withConnectionTimeoutMs (timeoutMs)
                 .withNumRedirectsToFollow (3)
                 .withExtraHeaders (headers)
                 .withStatusCode (&status);
@@ -65,6 +73,11 @@ namespace
             return {};
 
         return stream->readEntireStreamAsString();
+    }
+
+    bool usable (const juce::String& body, int status)
+    {
+        return body.isNotEmpty() && (status == 200 || status == 0);
     }
 
     juce::var field (const juce::var& obj, const char* name)
@@ -90,6 +103,17 @@ namespace
         return field (obj, name).toString().getIntValue();
     }
 
+    juce::String normalise (const juce::String& s)
+    {
+        // 全角标点用 UTF-8 字节转义构造：源码保持纯 ASCII，避免 MSVC 代码页乱码
+        const auto cjkPunct = juce::String::fromUTF8 (
+            "\xef\xbc\x88\xef\xbc\x89\xe3\x80\x90\xe3\x80\x91"
+            "\xe3\x80\x81\xc2\xb7\xef\xbc\x9a\xe3\x80\x8a\xe3\x80\x8b");
+
+        return s.toLowerCase().removeCharacters (
+            juce::String (" ()[]-.,:'\"") + cjkPunct);
+    }
+
     juce::String shortPreview (const juce::String& text)
     {
         juce::StringArray parts;
@@ -98,7 +122,6 @@ namespace
         {
             auto line = raw.trim();
 
-            // 去掉 [mm:ss.xx] / [ti:xxx] 这类头部，只留正文
             while (line.startsWith ("["))
             {
                 const int close = line.indexOfChar (']');
@@ -119,36 +142,13 @@ namespace
         return parts.joinIntoString ("  /  ");
     }
 
-    std::vector<Result> parseKugou (const juce::String& body)
+    /** 最终文本处理：去 BOM、按开关繁转简。 */
+    juce::String postProcess (const juce::String& text, bool simplify)
     {
-        std::vector<Result> out;
-        const auto root = juce::JSON::parse (body);
-        const auto candidates = field (root, "candidates");
-        const auto* arr = candidates.getArray();
+        auto out = simplify ? toSimplified (text) : text;
 
-        if (arr == nullptr)
-            return out;
-
-        for (const auto& v : *arr)
-        {
-            Result r;
-            r.id        = str (v, "id");
-            r.accessKey = str (v, "accesskey");
-            r.title     = str (v, "song");
-            r.artist    = str (v, "singer");
-            r.album     = str (v, "album");
-            r.durationSec = intField (v, "duration") / 1000;   // 酷狗给的是毫秒
-            r.source    = "Kugou";
-            r.wordSync  = true;                                  // 优先尝试 KRC 逐字
-
-            if (r.id.isEmpty() || r.accessKey.isEmpty())
-                continue;
-
-            if (r.title.isEmpty())
-                r.title = str (root, "keyword");
-
-            out.push_back (r);
-        }
+        if (out.isNotEmpty() && out[0] == juce::juce_wchar (0xfeff))
+            out = out.substring (1);
 
         return out;
     }
@@ -177,9 +177,10 @@ namespace
             if (r.lrc.isEmpty())
                 r.lrc = str (v, "plainLyrics");
 
-            if (r.lrc.trim().isEmpty())      // 纯音乐 / 没有歌词
+            if (r.lrc.trim().isEmpty())
                 continue;
 
+            r.lineCount = countTimedLines (r.lrc);
             r.preview = shortPreview (r.lrc);
             out.push_back (r);
         }
@@ -187,7 +188,7 @@ namespace
         return out;
     }
 
-    /** 自定义服务：纯 LRC 文本、JSON 数组（LRCLIB 形状）、或带 content 的 JSON 对象。 */
+    /** 自定义服务：纯 LRC、JSON 数组、或带 content 的 JSON 对象。 */
     std::vector<Result> parseCustom (const juce::String& body, const juce::String& title)
     {
         std::vector<Result> out;
@@ -203,6 +204,7 @@ namespace
             r.source = "Custom";
             r.lrc    = body;
             r.preview = shortPreview (body);
+            r.lineCount = countTimedLines (body);
             out.push_back (r);
             return out;
         }
@@ -219,7 +221,6 @@ namespace
             if (text.isEmpty()) text = str (root, "lrc");
             if (text.isEmpty()) return out;
 
-            // content 有可能是 base64 文本
             if (! text.contains ("[") && ! text.contains ("\n"))
             {
                 juce::MemoryOutputStream mo;
@@ -235,16 +236,17 @@ namespace
             r.source  = "Custom";
             r.lrc     = text;
             r.preview = shortPreview (text);
+            r.lineCount = countTimedLines (text);
             out.push_back (r);
             return out;
         }
 
-        // 既不是 JSON 也不是 LRC：当成纯文本歌词（解析器会给它默认间隔）
         Result r;
         r.title   = title;
         r.source  = "Custom";
         r.lrc     = body;
         r.preview = shortPreview (body);
+        r.lineCount = countTimedLines (body);
         out.push_back (r);
         return out;
     }
@@ -262,19 +264,391 @@ namespace
                   .replace ("{duration}", juce::String (durationSec));
     }
 
-    void sortByDuration (std::vector<Result>& results, int targetSec)
+    //--------------------------------------------------------------------------
+    /** 酷狗「歌曲库」搜索：返回带准确歌手、专辑、时长与 hash 的歌曲。 */
+    int songScore (const Result& r, const juce::String& title,
+                   const juce::String& artist, int targetSec)
     {
-        if (targetSec <= 0)
-            return;
+        const auto nt = normalise (title), na = normalise (artist);
+        const auto rt = normalise (r.title), ra = normalise (r.artist);
 
-        std::stable_sort (results.begin(), results.end(),
-            [targetSec] (const Result& a, const Result& b)
-            {
-                const int da = a.durationSec > 0 ? std::abs (a.durationSec - targetSec) : 999999;
-                const int db = b.durationSec > 0 ? std::abs (b.durationSec - targetSec) : 999999;
-                return da < db;
-            });
+        int score = 0;
+
+        if (rt == nt)                                   score += 100;
+        else if (rt.contains (nt) || nt.contains (rt))  score += 55;
+        else                                             score -= 40;
+
+        if (na.isNotEmpty())
+        {
+            if (ra == na)                                   score += 90;
+            else if (ra.contains (na) || na.contains (ra))  score += 70;
+            else                                             score -= 120;
+        }
+
+        if (targetSec > 0 && r.durationSec > 0)
+            score -= juce::jmin (30, std::abs (r.durationSec - targetSec) / 8);
+
+        // 现场版 / 伴奏之类排到录音室原版后面（中文词同样用字节转义）
+        const auto liveCn = juce::String::fromUTF8 ("\xe7\x8e\xb0\xe5\x9c\xba");
+        const auto instCn = juce::String::fromUTF8 ("\xe4\xbc\xb4\xe5\xa5\x8f");
+
+        if (r.title.contains ("Live") || r.title.contains ("live")
+            || r.title.contains (liveCn) || r.title.contains (instCn))
+            score -= 12;
+
+        return score;
     }
+
+    std::vector<Result> searchKugouSongs (juce::String title, juce::String artist,
+                                          int targetSec)
+    {
+        // 用户常把「歌名-歌手」一起粘进歌名框，这里拆开
+        if (artist.isEmpty())
+        {
+            const int dash = title.indexOfChar ('-');
+            if (dash > 0)
+            {
+                artist = title.substring (dash + 1).trim();
+                title  = title.substring (0, dash).trim();
+            }
+        }
+
+        const auto keyword = artist.isNotEmpty() ? title + " " + artist : title;
+        const juce::String tail = "/api/v3/search/song?format=json&keyword="
+                                + urlEncode (keyword)
+                                + "&page=1&pagesize=12&showtype=1";
+
+        // 该 CDN 的 HTTPS 证书在部分网络下 hostname 不匹配，明文 HTTP 优先
+        static const char* hosts[] =
+        {
+            "http://mobilecdn.kugou.com",
+            "https://mobilecdn.kugou.com",
+            "http://mobilecdnbj.kugou.com"
+        };
+
+        std::vector<Result> out;
+
+        for (const auto* host : hosts)
+        {
+            int status = 0;
+            const auto body = httpGet (juce::String (host) + tail, kKugouHeaders,
+                                       status, 5000);
+
+            if (! usable (body, status))
+                continue;
+
+            const auto root = juce::JSON::parse (body);
+            const auto data = field (root, "data");
+            const auto info = field (data, "info");
+            const auto* arr = info.getArray();
+
+            if (arr == nullptr)
+                continue;
+
+            for (const auto& v : *arr)
+            {
+                Result r;
+                r.title       = str (v, "songname");
+                r.artist      = str (v, "singername");
+                r.album       = str (v, "album_name");
+                r.hash        = str (v, "hash");
+                r.durationSec = intField (v, "duration");
+                r.source      = "Kugou";
+                r.wordSync    = true;
+
+                if (r.title.isEmpty() || r.hash.isEmpty())
+                    continue;
+
+                r.preview = r.artist;
+                if (r.album.isNotEmpty())
+                    r.preview += "  |  " + r.album;
+
+                out.push_back (r);
+            }
+
+            if (! out.empty())
+                break;
+        }
+
+        if (out.empty())
+            return out;
+
+        std::stable_sort (out.begin(), out.end(),
+            [&] (const Result& x, const Result& y)
+            {
+                return songScore (x, title, artist, targetSec)
+                     > songScore (y, title, artist, targetSec);
+            });
+
+        // 指定了歌手时，明显不匹配的翻唱/同名曲直接剔掉；但至少留 2 条以免空手
+        if (artist.isNotEmpty())
+        {
+            std::vector<Result> kept;
+
+            for (const auto& r : out)
+                if (songScore (r, title, artist, targetSec) >= 20 || kept.size() < 2)
+                    kept.push_back (r);
+
+            out = std::move (kept);
+        }
+
+        if (out.size() > 12)
+            out.resize (12);
+
+        return out;
+    }
+
+    /** 旧的关键词歌词搜索（歌曲库不可用时的兜底，歌手信息不可靠）。 */
+    std::vector<Result> searchKugouByKeyword (const juce::String& title,
+                                              const juce::String& artist,
+                                              int targetSec)
+    {
+        std::vector<Result> all;
+        juce::StringArray keywords;
+
+        if (artist.isNotEmpty())
+            keywords.add (title + " " + artist);
+
+        keywords.add (title);
+
+        for (const auto& kw : keywords)
+        {
+            int status = 0;
+            const auto body = httpGet (
+                "https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword="
+                + urlEncode (kw), kKugouHeaders, status, 6000);
+
+            if (! usable (body, status))
+                continue;
+
+            const auto root = juce::JSON::parse (body);
+            const auto candidates = field (root, "candidates");
+            const auto* arr = candidates.getArray();
+
+            if (arr == nullptr)
+                continue;
+
+            for (const auto& v : *arr)
+            {
+                Result r;
+                r.id          = str (v, "id");
+                r.accessKey   = str (v, "accesskey");
+                r.title       = str (v, "song");
+                r.artist      = str (v, "singer");
+                r.durationSec = intField (v, "duration") / 1000;
+                r.source      = "Kugou";
+                r.wordSync    = true;
+
+                if (r.id.isEmpty() || r.accessKey.isEmpty())
+                    continue;
+
+                if (r.title.isEmpty())
+                    r.title = str (root, "keyword");
+
+                all.push_back (r);
+            }
+
+            if (! all.empty())
+                break;
+        }
+
+        if (targetSec > 0)
+        {
+            std::stable_sort (all.begin(), all.end(),
+                [targetSec] (const Result& a, const Result& b)
+                {
+                    const int da = a.durationSec > 0 ? std::abs (a.durationSec - targetSec) : 999999;
+                    const int db = b.durationSec > 0 ? std::abs (b.durationSec - targetSec) : 999999;
+                    return da < db;
+                });
+        }
+
+        if (all.size() > 20)
+            all.resize (20);
+
+        return all;
+    }
+
+    /** 用歌曲 hash 精确查歌词候选，并按歌曲时长挑最接近的几条。 */
+    std::vector<Result> lyricsByHash (const Result& song)
+    {
+        std::vector<Result> out;
+        const int ms = song.durationSec > 0 ? song.durationSec * 1000 : 0;
+
+        juce::String url = "https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword="
+                         + urlEncode (song.title)
+                         + "&hash=" + urlEncode (song.hash);
+
+        if (ms > 0)
+            url += "&duration=" + juce::String (ms);
+
+        int status = 0;
+        const auto body = httpGet (url, kKugouHeaders, status, 6000);
+
+        if (! usable (body, status))
+            return out;
+
+        const auto root = juce::JSON::parse (body);
+        const auto candidates = field (root, "candidates");
+        const auto* arr = candidates.getArray();
+
+        if (arr == nullptr)
+            return out;
+
+        for (const auto& v : *arr)
+        {
+            Result c;
+            c.id          = str (v, "id");
+            c.accessKey   = str (v, "accesskey");
+            c.title       = str (v, "song");
+            c.artist      = str (v, "singer");
+            c.durationSec = intField (v, "duration") / 1000;
+            c.source      = "Kugou";
+            c.wordSync    = true;
+
+            if (c.id.isEmpty() || c.accessKey.isEmpty())
+                continue;
+
+            out.push_back (c);
+        }
+
+        if (ms > 0)
+        {
+            std::stable_sort (out.begin(), out.end(),
+                [ms] (const Result& a, const Result& b)
+                {
+                    return std::abs (a.durationSec * 1000 - ms)
+                         < std::abs (b.durationSec * 1000 - ms);
+                });
+        }
+
+        if (out.size() > 4)
+            out.resize (4);
+
+        return out;
+    }
+
+    /** 下载一条酷狗歌词候选：KRC 逐字优先，失败退普通 LRC。 */
+    juce::String fetchKugouLyrics (const Result& c)
+    {
+        if (c.id.isEmpty() || c.accessKey.isEmpty())
+            return {};
+
+        const juce::String base = "https://lyrics.kugou.com/download?ver=1&client=pc&id="
+                                + urlEncode (c.id)
+                                + "&accesskey=" + urlEncode (c.accessKey)
+                                + "&charset=utf8&fmt=";
+
+        for (const char* fmt : { "krc", "lrc" })
+        {
+            int status = 0;
+            const auto body = httpGet (base + fmt, kKugouHeaders, status, 6000);
+
+            if (! usable (body, status))
+                continue;
+
+            const auto root = juce::JSON::parse (body);
+            const auto b64 = str (root, "content");
+
+            if (b64.isEmpty())
+                continue;
+
+            juce::MemoryOutputStream decoded;
+
+            if (! juce::Base64::convertFromBase64 (decoded, b64) || decoded.getDataSize() == 0)
+                continue;
+
+            juce::MemoryBlock raw (decoded.getData(), decoded.getDataSize());
+
+            if (juce::String (fmt) == "krc")
+            {
+                if (! Krc::isKrcData (raw.getData(), static_cast<int> (raw.getSize())))
+                    continue;
+
+                const auto plain = Krc::decrypt (raw);
+                const auto lrc = Krc::toEnhancedLrc (plain);
+
+                if (lrc.isNotEmpty())
+                    return lrc;
+            }
+            else
+            {
+                const auto text = juce::String::fromUTF8 (
+                    static_cast<const char*> (raw.getData()),
+                    static_cast<int> (raw.getSize()));
+
+                if (text.isNotEmpty())
+                    return text;
+            }
+        }
+
+        return {};
+    }
+}
+
+//==============================================================================
+int countTimedLines (const juce::String& text)
+{
+    int n = 0;
+
+    for (const auto& raw : juce::StringArray::fromLines (text))
+    {
+        const auto t = raw.trim();
+
+        if (! t.startsWith ("["))
+            continue;
+
+        const int close = t.indexOfChar (']');
+        if (close < 4)
+            continue;
+
+        const auto tag = t.substring (1, close);
+        const int colon = tag.indexOfChar (':');
+
+        if (colon > 0 && tag.substring (0, colon).containsOnly ("0123456789"))
+            ++n;
+    }
+
+    return n;
+}
+
+juce::String toSimplified (const juce::String& text)
+{
+   #if JUCE_WINDOWS
+    if (text.isEmpty())
+        return text;
+
+    const auto* utf8 = text.toRawUTF8();
+    const int bytes = text.getNumBytesAsUTF8();
+
+    const int wlen = MultiByteToWideChar (CP_UTF8, 0, utf8, bytes, nullptr, 0);
+    if (wlen <= 0)
+        return text;
+
+    std::wstring wide (static_cast<size_t> (wlen), L'\0');
+    MultiByteToWideChar (CP_UTF8, 0, utf8, bytes, wide.data(), wlen);
+
+    std::wstring mapped (static_cast<size_t> (wlen) + 8, L'\0');
+    const int n = LCMapStringEx (LOCALE_NAME_USER_DEFAULT, LCMAP_SIMPLIFIED_CHINESE,
+                                 wide.c_str(), wlen, mapped.data(),
+                                 static_cast<int> (mapped.size()),
+                                 nullptr, nullptr, 0);
+    if (n <= 0)
+        return text;
+
+    const int need = WideCharToMultiByte (CP_UTF8, 0, mapped.c_str(), n,
+                                          nullptr, 0, nullptr, nullptr);
+    if (need <= 0)
+        return text;
+
+    std::string result (static_cast<size_t> (need), '\0');
+    WideCharToMultiByte (CP_UTF8, 0, mapped.c_str(), n, result.data(), need,
+                         nullptr, nullptr);
+
+    return juce::String::fromUTF8 (result.data(), need);
+   #else
+    return text;
+   #endif
 }
 
 //==============================================================================
@@ -298,7 +672,7 @@ Outcome search (juce::String title, juce::String artist,
         const auto body = httpGet (expandTemplate (customUrl, title, artist, durationSec),
                                    kLrclibHeaders, status);
 
-        if (status == 200 && body.isNotEmpty())
+        if (usable (body, status))
         {
             auto found = parseCustom (body, title);
 
@@ -311,49 +685,45 @@ Outcome search (juce::String title, juce::String artist,
         }
     }
 
-    //---- 2. 酷狗直连 ---------------------------------------------------------
-    juce::StringArray keywords;
-
-    if (artist.isNotEmpty())
-        keywords.add (title + " " + artist);
-
-    keywords.add (title);
-
-    for (const auto& kw : keywords)
+    //---- 2. 酷狗歌曲库（带准确歌手与 hash，避免同名串歌） -------------------
     {
-        int status = 0;
-        const auto body = httpGet (
-            "https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword="
-            + urlEncode (kw), kKugouHeaders, status);
+        auto found = searchKugouSongs (title, artist, durationSec);
 
-        if (status != 200 || body.isEmpty())
-            continue;
-
-        auto found = parseKugou (body);
-
-        if (found.empty())
-            continue;
-
-        sortByDuration (found, durationSec);
-
-        if (found.size() > 20)
-            found.resize (20);
-
-        outcome.results = std::move (found);
-        outcome.via = "Kugou";
-        return outcome;
+        if (! found.empty())
+        {
+            outcome.results = std::move (found);
+            outcome.via = "Kugou";
+            return outcome;
+        }
     }
 
-    //---- 3. LRCLIB 兜底 ------------------------------------------------------
+    //---- 3. 酷狗旧关键词接口（歌曲库不可用时的兜底） -------------------------
+    {
+        auto found = searchKugouByKeyword (title, artist, durationSec);
+
+        if (! found.empty())
+        {
+            outcome.results = std::move (found);
+            outcome.via = "Kugou (keyword)";
+            return outcome;
+        }
+    }
+
+    //---- 4. LRCLIB 兜底 ------------------------------------------------------
     {
         const auto q = artist.isNotEmpty() ? title + " " + artist : title;
         int status = 0;
         const auto body = httpGet ("https://lrclib.net/api/search?q=" + urlEncode (q),
                                    kLrclibHeaders, status);
 
-        if (status == 200 && body.isNotEmpty())
+        if (usable (body, status))
         {
             auto found = parseLrclib (body, "LRCLIB");
+
+            // 行数多的排前面，残缺条目自然沉底
+            std::stable_sort (found.begin(), found.end(),
+                [] (const Result& a, const Result& b)
+                { return a.lineCount > b.lineCount; });
 
             if (! found.empty())
             {
@@ -371,63 +741,94 @@ Outcome search (juce::String title, juce::String artist,
     return outcome;
 }
 
-juce::String download (const Result& result)
+juce::String download (const Result& result, bool simplify)
 {
     if (result.lrc.isNotEmpty())
-        return result.lrc;
+        return postProcess (result.lrc, simplify);
 
-    if (result.id.isEmpty() || result.accessKey.isEmpty())
-        return {};
-
-    const juce::String base = "https://lyrics.kugou.com/download?ver=1&client=pc&id="
-                            + urlEncode (result.id)
-                            + "&accesskey=" + urlEncode (result.accessKey)
-                            + "&charset=utf8&fmt=";
-
-    // 先要逐字 KRC，拿不到再退普通 LRC
-    for (const char* fmt : { "krc", "lrc" })
+    // 歌曲库结果：按 hash 精确查歌词，多条候选中挑时间码行数最多的一条
+    if (result.hash.isNotEmpty())
     {
-        int status = 0;
-        const auto body = httpGet (base + fmt, kKugouHeaders, status);
+        const auto candidates = lyricsByHash (result);
+        juce::String best;
+        int bestLines = 0;
 
-        if (status != 200 || body.isEmpty())
-            continue;
-
-        const auto root = juce::JSON::parse (body);
-        const auto b64 = str (root, "content");
-
-        if (b64.isEmpty())
-            continue;
-
-        juce::MemoryOutputStream decoded;
-
-        if (! juce::Base64::convertFromBase64 (decoded, b64) || decoded.getDataSize() == 0)
-            continue;
-
-        juce::MemoryBlock raw (decoded.getData(), decoded.getDataSize());
-
-        if (juce::String (fmt) == "krc")
+        for (const auto& c : candidates)
         {
-            if (! Krc::isKrcData (raw.getData(), static_cast<int> (raw.getSize())))
+            const auto text = fetchKugouLyrics (c);
+
+            if (text.isEmpty())
                 continue;
 
-            const auto plain = Krc::decrypt (raw);
-            const auto lrc = Krc::toEnhancedLrc (plain);
+            const auto converted = postProcess (text, simplify);
+            const int lines = countTimedLines (converted);
 
-            if (lrc.isNotEmpty())
-                return lrc;
-        }
-        else
-        {
-            const auto text = juce::String::fromUTF8 (
-                static_cast<const char*> (raw.getData()),
-                static_cast<int> (raw.getSize()));
+            if (lines > bestLines)
+            {
+                best = converted;
+                bestLines = lines;
+            }
 
-            if (text.isNotEmpty())
-                return text;
+            if (bestLines >= 10)
+                break;
         }
+
+        return best;
     }
 
+    if (result.id.isNotEmpty() && result.accessKey.isNotEmpty())
+        return postProcess (fetchKugouLyrics (result), simplify);
+
     return {};
+}
+
+LxResult fetchFromLx (juce::String baseUrl, bool simplify)
+{
+    LxResult out;
+    auto base = baseUrl.trim();
+
+    if (base.isEmpty())
+        base = "http://127.0.0.1:23330";
+
+    while (base.endsWith ("/"))
+        base = base.dropLastCharacters (1);
+
+    int status = 0;
+    const auto statusBody = httpGet (
+        base + "/status?filter=name,singer,duration,lyric", juce::String(), status, 2500);
+
+    if (usable (statusBody, status))
+    {
+        const auto root = juce::JSON::parse (statusBody);
+        out.title  = str (root, "name");
+        out.artist = str (root, "singer");
+        const auto lyric = str (root, "lyric");
+
+        if (lyric.isNotEmpty())
+            out.lrc = lyric;
+    }
+
+    if (out.lrc.isEmpty())
+    {
+        status = 0;
+        const auto body = httpGet (base + "/lyric", juce::String(), status, 2500);
+
+        if (usable (body, status))
+            out.lrc = body;
+    }
+
+    if (out.lrc.trim().isEmpty())
+    {
+        out.error = "connect";
+        return out;
+    }
+
+    out.lrc = postProcess (out.lrc, simplify);
+    out.lineCount = countTimedLines (out.lrc);
+
+    if (out.lineCount == 0)
+        out.error = "noLyric";
+
+    return out;
 }
 }

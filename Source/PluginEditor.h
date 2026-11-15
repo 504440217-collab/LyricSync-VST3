@@ -191,6 +191,8 @@ private:
     void searchFinished (OnlineLyrics::Outcome outcome);
     void loadSelectedResult();
     void downloadFinished (juce::String lrc, juce::String label);
+    void startLxFetch();
+    void lxFinished (OnlineLyrics::LxResult result);
     void commitCustomUrl();
 
     void enterAnnotateMode();             // 进入"着色与备注"模式（就地选择，不切界面）
@@ -338,6 +340,8 @@ private:
     bool   searchBusy  = false;
     juce::String searchStatus;
     juce::String customSearchUrl;            // 全局偏好里保存的自定义服务地址
+    juce::String lxMusicUrl { "http://127.0.0.1:23330" };
+    bool   simplifyChinese = true;           // 在线歌词繁体转简体
     std::vector<OnlineLyrics::Result> searchResults;
     int    searchSel    = -1;
     int    searchScroll = 0;
@@ -428,7 +432,9 @@ private:
     juce::TextEditor  styleNoteEditor;
 
     juce::TextButton  onlineLyricsButton;
-    juce::TextButton  searchGoButton, searchLoadButton;
+    juce::TextButton  searchGoButton, searchLoadButton, searchLxButton;
+    juce::TextEditor  lxUrlEditor;
+    juce::TextButton  simplifyToggle;
     IconButton        closeSearchButton { IconButton::Icon::close };
     juce::TextEditor  searchTitleEditor, searchArtistEditor, customUrlEditor;
 
