@@ -2824,6 +2824,7 @@ void LyricSyncEditor::timerCallback()
 
 void LyricSyncEditor::updateLabels (double t)
 {
+    juce::ignoreUnused (t);
     offsetLabel.setText (juce::String (offsetMs, 0) + " ms", juce::dontSendNotification);
     audioLabel .setText (audioRangeText(), juce::dontSendNotification);
 
@@ -3718,11 +3719,13 @@ void LyricSyncEditor::loadSelectedResult()
     searchStatus = tr (Lang::TextId::onlineLoading);
     repaint();
 
+    const bool simplify = simplifyChinese;
+
     juce::Component::SafePointer<LyricSyncEditor> safe (this);
 
-    std::thread ([safe, result]()
+    std::thread ([safe, result, simplify]()
     {
-        const auto lrc = OnlineLyrics::download (result, simplifyChinese);
+        const auto lrc = OnlineLyrics::download (result, simplify);
 
         juce::MessageManager::callAsync ([safe, lrc, label = result.title]()
         {
@@ -5348,11 +5351,11 @@ void LyricSyncEditor::exportLyrics()
     chooser = std::make_unique<juce::FileChooser> (tr (Lang::TextId::exportTitle),
                                                    defaultFile, "*.lrc");
 
-    const int flags = juce::FileBrowserComponent::saveMode
-                    | juce::FileBrowserComponent::canSelectFiles
-                    | juce::FileBrowserComponent::warnAboutOverwriting;
+    const int saveFlags = juce::FileBrowserComponent::saveMode
+                        | juce::FileBrowserComponent::canSelectFiles
+                        | juce::FileBrowserComponent::warnAboutOverwriting;
 
-    chooser->launchAsync (flags, [this, lrc] (const juce::FileChooser& fc)
+    chooser->launchAsync (saveFlags, [this, lrc] (const juce::FileChooser& fc)
     {
         auto file = fc.getResult();
 
