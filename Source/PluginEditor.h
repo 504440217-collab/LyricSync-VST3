@@ -9,6 +9,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <vector>
+#include <map>
 
 //==============================================================================
 /**
@@ -151,7 +152,8 @@ private:
                       const juce::String& text, float size, juce::Colour colour,
                       bool bold, float sungProgress = -1.0f,
                       juce::Colour sungColour = {}, float alpha = 1.0f,
-                      juce::Justification just = juce::Justification::centred);
+                      juce::Justification just = juce::Justification::centred,
+                      const juce::String& prefix = {});
 
     //---- Layout -------------------------------------------------------------
     juce::Rectangle<int> scaledRect (float x, float y, float w, float h) const;
@@ -175,6 +177,25 @@ private:
     void enterTapMode();
     void stampTap();
     void undoStamp();
+    void setLyricsStart();                // 把当前播放位置设为歌词起点
+    void undoSetStart();                  // 撤销上一次起点调整
+
+    void enterAnnotateMode();             // 进入"着色与备注"模式
+    void exitAnnotateMode();
+    void openLineStyle (int index);       // 打开某一句的样式编辑
+    void applyLineStyle();
+    void clearLineStyle();
+    void closeLineStyle();
+    void paintAnnotateStage (juce::Graphics& g, juce::Rectangle<float> area);
+    std::vector<juce::Rectangle<float>> annotateRows (juce::Rectangle<float> area) const;
+    std::vector<juce::Rectangle<float>> styleSwatches (juce::Rectangle<float> card) const;
+    juce::Rectangle<float> styleCard() const;
+    int  annotateFirstRow() const;
+    void loadLineStyles();
+    void saveLineStyles();
+    juce::Colour lineColourFor (int index, juce::Colour fallback) const;
+    juce::String lineNoteFor (int index) const;
+
     void armTapLine (int index);          // 预备重打某一句（不清空任何时间）
     void cancelArm();                     // 取消预备
     void nudgeTap (int deltaMs);          // 微调刚打好的那一句
@@ -275,6 +296,21 @@ private:
     bool   settingsOpen    = false;
     bool   aboutOpen       = false;
     bool   updatingCombos  = false;
+    //---- 逐句样式（颜色 + 备注） --------------------------------------------
+    struct LineStyle
+    {
+        int colourIndex = -1;                // -1 = 默认（跟随主题/歌词颜色）
+        juce::String note;
+    };
+
+    std::map<int, LineStyle> lineStyles;
+
+    bool   annotateMode    = false;
+    int    styleEditIndex  = -1;             // >=0 表示正在编辑某一句的样式
+    int    styleEditColour = -1;
+    int    annotateScroll  = 0;
+    std::vector<double> offsetHistory;       // 「设起点 / 偏移」的撤销栈
+
     bool   showHints       = true;         // 左下角轮播提示开关
     int    hintIndex       = 0;
     double hintRotateMs    = 0.0;
@@ -352,6 +388,10 @@ private:
     juce::TextButton  exportButton;
     juce::TextButton  retempoButton;
     juce::TextButton  hintToggle;
+    juce::TextButton  setStartButton, undoSetStartButton;
+    juce::TextButton  annotateButton;
+    juce::TextButton  styleApplyButton, styleClearButton, styleCancelButton;
+    juce::TextEditor  styleNoteEditor;
 
     juce::TextButton  demoClockToggle;
 

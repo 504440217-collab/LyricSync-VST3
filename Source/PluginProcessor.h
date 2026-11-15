@@ -72,6 +72,7 @@ namespace Settings
     inline const juce::Identifier customBg    { "customBg" };     // 自定义背景图路径
     inline const juce::Identifier advance     { "advance" };      // 0 逐句 / 1 逐字
     inline const juce::Identifier showHints   { "showHints" };    // 左下角轮播提示开关
+    inline const juce::Identifier lineStyles  { "lineStyles" };   // 逐句颜色 / 备注
     // 从轨道实际音频测得的范围（秒，工程时间）。-1 表示尚未测到。
     inline const juce::Identifier audioStart { "audioStart" };
     inline const juce::Identifier audioEnd   { "audioEnd" };

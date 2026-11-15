@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.8.0";
+    const char* const kVersion = "1.8.1";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -35,6 +35,14 @@ namespace
         0x00000000, 0xfff2f5ff, 0xffffe9a3, 0xff5ce1c1, 0xff7cc6ff, 0xffff9ec4
     };
     const int kNumLyricColours = static_cast<int> (sizeof (kLyricColours) / sizeof (kLyricColours[0]));
+
+    // 逐句着色用的调色板：红 / 橙 / 黄 / 绿 / 青 / 蓝 / 紫 / 粉
+    const juce::uint32 kLineColours[] =
+    {
+        0xffff5555, 0xffff9f43, 0xffffd93d, 0xff51cf66,
+        0xff22d3ee, 0xff4d9fff, 0xffa78bfa, 0xffff7ab6
+    };
+    const int kNumLineColours = static_cast<int> (sizeof (kLineColours) / sizeof (kLineColours[0]));
 
     const int kZoomSteps[] = { 50, 75, 100, 125, 150, 200 };
     const int kNumZoomSteps = static_cast<int> (sizeof (kZoomSteps) / sizeof (kZoomSteps[0]));
@@ -429,6 +437,7 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     // 全局默认值先铺一遍，工程状态恢复后会覆盖它（见 syncControlsFromSettings）。
     loadUiPrefs();
     syncControlsFromSettings();
+    loadLineStyles();
 
     // 右下角缩放柄回来了：自由拖拽即"无极缩放"，画布始终按比例整体缩放。
     setResizable (true, true);
@@ -447,7 +456,9 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
                      &tapRowRestampButton, &tapRowApplyButton, &tapRowCancelButton,
                      &measureButton, &exportButton, &retempoButton, &demoClockToggle,
                      &orientHButton, &orientVButton, &pickImageButton, &clearImageButton,
-                     &hintToggle })
+                     &hintToggle,
+                     &setStartButton, &undoSetStartButton, &annotateButton,
+                     &styleApplyButton, &styleClearButton, &styleCancelButton })
     {
         b->addListener (this);
         addAndMakeVisible (*b);
@@ -503,6 +514,16 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
         ed->addMouseListener (this, false);
         addChildComponent (*ed);
     }
+
+    styleNoteEditor.setMultiLine (false);
+    styleNoteEditor.setReturnKeyStartsNewLine (false);
+    styleNoteEditor.setScrollbarsShown (false);
+    styleNoteEditor.setJustification (juce::Justification::centredLeft);
+    styleNoteEditor.setPopupMenuEnabled (false);
+    styleNoteEditor.addMouseListener (this, false);
+    styleNoteEditor.onReturnKey = [this] { applyLineStyle(); };
+    styleNoteEditor.onEscapeKey = [this] { closeLineStyle(); };
+    addChildComponent (styleNoteEditor);
 
     tapTextEditor.setTextToShowWhenEmpty (tr (Lang::TextId::tapRowText), juce::Colours::grey);
     tapTimeEditor.setTextToShowWhenEmpty ("00:00.00", juce::Colours::grey);
@@ -744,6 +765,14 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     clearImageButton.setButtonText (tr (Lang::TextId::clearImage));
 
     fontLabel.setText (tr (Lang::TextId::fontSize), juce::dontSendNotification);
+    setStartButton   .setButtonText (tr (Lang::TextId::setStart));
+    undoSetStartButton.setButtonText (tr (Lang::TextId::undoSetStart));
+    annotateButton   .setButtonText (tr (annotateMode ? Lang::TextId::tapFinish
+                                                      : Lang::TextId::annotate));
+    styleApplyButton .setButtonText (tr (Lang::TextId::tapRowApply));
+    styleClearButton .setButtonText (tr (Lang::TextId::annotateClear));
+    styleCancelButton.setButtonText (tr (Lang::TextId::cancel));
+
     hintToggle.setButtonText (showHints ? tr (Lang::TextId::onLabel)
                                         : tr (Lang::TextId::offLabel));
     hintToggle.setToggleState (showHints, juce::dontSendNotification);
@@ -836,6 +865,9 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     clearImageButton.setTooltip (tr (Lang::TextId::tipClearImage));
     closeSettingsButton.setTooltip (tr (Lang::TextId::tipClose));
     hintToggle      .setTooltip (tr (Lang::TextId::showHints));
+    setStartButton  .setTooltip (tr (Lang::TextId::tipSetStart));
+    undoSetStartButton.setTooltip (tr (Lang::TextId::tipUndoSetStart));
+    annotateButton  .setTooltip (tr (Lang::TextId::tipAnnotate));
     hintLabel       .setTooltip (tr (Lang::TextId::hintClick));
 
     if (reloadDemoLyrics && usingDemoLyrics)
@@ -923,7 +955,7 @@ void LyricSyncEditor::updateVisibility()
     }
 
     const bool overlay = settingsOpen || aboutOpen;
-    const bool normal  = ! editing && ! tapMode && ! overlay;
+    const bool normal  = ! editing && ! tapMode && ! annotateMode && ! overlay;
 
     for (auto* c : { static_cast<juce::Component*> (&loadButton),
                      static_cast<juce::Component*> (&pasteButton),
@@ -943,6 +975,18 @@ void LyricSyncEditor::updateVisibility()
 
     demoPlayButton .setVisible (normal && demoMode);
     demoStopButton .setVisible (normal && demoMode);
+
+    setStartButton   .setVisible (normal);
+    undoSetStartButton.setVisible (normal);
+    annotateButton   .setVisible ((normal || (annotateMode && ! overlay)));
+
+    // 样式卡片
+    const bool styleEdit = annotateMode && ! overlay && styleEditIndex >= 0;
+
+    styleNoteEditor  .setVisible (styleEdit);
+    styleApplyButton .setVisible (styleEdit);
+    styleClearButton .setVisible (styleEdit);
+    styleCancelButton.setVisible (styleEdit);
 
     // 纯享模式把上面这些都隐藏过，回来必须逐个恢复；
     // 这三个 Label 不在上面那批里，之前漏掉，导致退出全屏后提示词永久消失。
@@ -1041,6 +1085,9 @@ void LyricSyncEditor::updateScaledFonts()
 
     tapTextEditor.applyFontToAllText (uiFont (13.0f * uiScale));
     tapTimeEditor.applyFontToAllText (uiFont (13.0f * uiScale));
+    styleNoteEditor.applyFontToAllText (uiFont (13.0f * uiScale));
+    styleNoteEditor.setTextToShowWhenEmpty (tr (Lang::TextId::annotateNotePlaceholder),
+                                            palette.faint.withAlpha (0.6f));
 }
 
 void LyricSyncEditor::applyWindowSize()
@@ -1148,6 +1195,18 @@ void LyricSyncEditor::resized()
         hintLabel .setBounds (scaledRect (22, 542, 540, 20));
         audioLabel.setBounds (scaledRect (566, 541, 110, 22));
         retempoButton.setBounds (scaledRect (836, 512, 102, 24));
+
+        setStartButton   .setBounds (scaledRect (22, 568, 92, 26));
+        undoSetStartButton.setBounds (scaledRect (122, 568, 68, 26));
+        annotateButton   .setBounds (scaledRect (198, 568, 96, 26));
+
+        // 样式卡片里的控件
+        const auto card = styleCard();
+        styleNoteEditor  .setBounds (scaledRect (card.getX() + 24.0f, card.getY() + 92.0f,
+                                                 card.getWidth() - 48.0f, 28.0f));
+        styleApplyButton .setBounds (scaledRect (card.getX() + 24.0f, card.getY() + 136.0f, 100.0f, 28.0f));
+        styleClearButton .setBounds (scaledRect (card.getX() + 132.0f, card.getY() + 136.0f, 100.0f, 28.0f));
+        styleCancelButton.setBounds (scaledRect (card.getX() + 240.0f, card.getY() + 136.0f, 100.0f, 28.0f));
     }
     else
     {
@@ -1195,11 +1254,22 @@ void LyricSyncEditor::resized()
             measureButton  .setBounds (scaledRect (ox + 342, 720, 150, 30));
         }
 
-        fileLabel .setBounds (scaledRect (22, 762, baseW() - 44.0f, 22));
-        hintLabel .setBounds (scaledRect (22, 812, baseW() - 44.0f, 20));
-        audioLabel.setBounds (scaledRect (ox + 22, 836, 240, 22));
-        exportButton.setBounds (scaledRect (ox + 270, 836, 200, 26));
-        retempoButton.setBounds (scaledRect (ox + 478, 836, 100, 26));
+        setStartButton   .setBounds (scaledRect (ox + 22, 756, 176, 28));
+        undoSetStartButton.setBounds (scaledRect (ox + 206, 756, 176, 28));
+        annotateButton   .setBounds (scaledRect (ox + 390, 756, 176, 28));
+
+        fileLabel .setBounds (scaledRect (22, 794, baseW() - 44.0f, 22));
+        hintLabel .setBounds (scaledRect (22, 818, baseW() - 44.0f, 20));
+        audioLabel.setBounds (scaledRect (ox + 22, 846, 240, 22));
+        exportButton.setBounds (scaledRect (ox + 270, 846, 200, 26));
+        retempoButton.setBounds (scaledRect (ox + 478, 846, 100, 26));
+
+        const auto card = styleCard();
+        styleNoteEditor  .setBounds (scaledRect (card.getX() + 24.0f, card.getY() + 92.0f,
+                                                 card.getWidth() - 48.0f, 28.0f));
+        styleApplyButton .setBounds (scaledRect (card.getX() + 24.0f, card.getY() + 146.0f, 150.0f, 30.0f));
+        styleClearButton .setBounds (scaledRect (card.getX() + 190.0f, card.getY() + 146.0f, 150.0f, 30.0f));
+        styleCancelButton.setBounds (scaledRect (card.getX() + 356.0f, card.getY() + 146.0f, 150.0f, 30.0f));
     }
 
     //---- Settings panel -----------------------------------------------------
@@ -1343,7 +1413,10 @@ void LyricSyncEditor::paint (juce::Graphics& g)
     if (! zenMode)
         paintHeader (g);
 
-    paintStage  (g, stageArea());
+    if (annotateMode)
+        paintAnnotateStage (g, stageArea());
+    else
+        paintStage  (g, stageArea());
 
     if (zenMode)
         drawText (g, juce::Rectangle<float> (0.0f, baseH() - 34.0f, baseW(), 20.0f),
@@ -1576,21 +1649,23 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
 
                 const float fade = 0.55f + 0.45f * transition;
 
-                // 换句时的整行颜色过渡（由白渐入主题色）
-                const auto tint = palette.text.interpolatedWith (currentTint,
-                                                                 juce::jlimit (0.0f, 1.0f, transition));
+                // 这一句如果单独设了颜色，就用它代替主题色
+                const auto lineTint = lineColourFor (i, currentTint);
+                const auto note = lineNoteFor (i);
 
                 if (advanceMode == 1)
                 {
-                    // 逐字：未唱的字是白色，唱到的字由白渐变为主题色（字内渐变）
+                    // 逐字：未唱的字是白色，唱到的字由白渐变为该行颜色（字内渐变）
                     drawText (g, lineRect, line.text, size, palette.text, true,
-                              sung, currentTint, fade);
+                              sung, lineTint, fade, juce::Justification::centred, note);
                 }
                 else
                 {
-                    // 逐句：整行在换句时由白渐变为主题色
-                    drawText (g, lineRect, line.text, size, tint, true,
-                              -1.0f, palette.text, fade);
+                    // 逐句：整行在换句时由白渐变为该行颜色
+                    const auto lineFade = palette.text.interpolatedWith (lineTint,
+                                                                         juce::jlimit (0.0f, 1.0f, transition));
+                    drawText (g, lineRect, line.text, size, lineFade, true,
+                              -1.0f, palette.text, fade, juce::Justification::centred, note);
                 }
 
                 if (line.translation.isNotEmpty())
@@ -1604,14 +1679,15 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
             else
             {
                 // 刚被替换下来的那一句：从主题色慢慢淡回普通颜色
-                auto colour = palette.text;
+                auto colour = lineColourFor (i, palette.text);
 
                 if (i == previousIndex && transition < 0.999f)
-                    colour = currentTint.interpolatedWith (palette.text,
-                                                           juce::jlimit (0.0f, 1.0f, transition));
+                    colour = lineColourFor (i, currentTint)
+                               .interpolatedWith (colour, juce::jlimit (0.0f, 1.0f, transition));
 
                 drawText (g, lineRect, line.text, size, colour,
-                          ad < 1.5f, -1.0f, {}, alpha);
+                          ad < 1.5f, -1.0f, {}, alpha,
+                          juce::Justification::centred, lineNoteFor (i));
             }
         }
     }
@@ -1679,6 +1755,149 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
                                                  area.getWidth() - 120.0f, 20.0f),
                       tr (Lang::TextId::bpmPrefix) + juce::String (bpmNow, 1),
                       11.0f * widthScale, palette.faint, false);
+        }
+    }
+}
+
+//==============================================================================
+void LyricSyncEditor::paintAnnotateStage (juce::Graphics& g, juce::Rectangle<float> area)
+{
+    const auto& doc = processor.lyrics();
+    const int total = doc.size();
+
+    g.setColour (palette.accent);
+    g.setFont (uiFont (10.5f, true));
+    g.drawText (tr (Lang::TextId::annotateTitle),
+                static_cast<int> (area.getX() + 30.0f),
+                static_cast<int> (area.getY() + 15.0f), 240, 16,
+                juce::Justification::centredLeft);
+
+    g.setColour (palette.faint);
+    g.setFont (uiFont (10.0f));
+    g.drawText (tr (Lang::TextId::annotateHint),
+                static_cast<int> (area.getRight() - 420.0f),
+                static_cast<int> (area.getY() + 15.0f), 390, 16,
+                juce::Justification::centredRight);
+
+    if (total <= 0)
+        return;
+
+    const auto rows = annotateRows (area);
+    const int  first = annotateFirstRow();
+
+    for (int i = 0; i < static_cast<int> (rows.size()); ++i)
+    {
+        const auto r = rows[(size_t) i];
+        const int  li = first + i;
+        const bool styled = (lineStyles.count (li) > 0);
+        const auto note = lineNoteFor (li);
+        const auto colour = lineColourFor (li, palette.text);
+
+        g.setColour (palette.text.withAlpha (i % 2 == 0 ? 0.05f : 0.025f));
+        g.fillRoundedRectangle (r, 5.0f);
+
+        auto ri = r.toNearestInt();
+
+        g.setColour (palette.faint);
+        g.setFont (uiFont (9.5f));
+        g.drawText (juce::String (li + 1), ri.removeFromLeft (26),
+                    juce::Justification::centredRight, false);
+
+        // 颜色点
+        {
+            auto sw = ri.removeFromLeft (26).toFloat().withSizeKeepingCentre (12.0f, 12.0f);
+
+            if (styled && lineStyles[li].colourIndex >= 0)
+            {
+                g.setColour (colour);
+                g.fillEllipse (sw);
+            }
+            else
+            {
+                g.setColour (palette.text.withAlpha (0.22f));
+                g.drawEllipse (sw, 1.0f);
+            }
+        }
+
+        // 备注
+        if (note.isNotEmpty())
+        {
+            g.setColour (palette.dim);
+            g.setFont (uiFont (10.0f, true));
+            g.drawText (note, ri.removeFromLeft (96),
+                        juce::Justification::centredLeft, true);
+        }
+        else
+        {
+            ri.removeFromLeft (96);
+        }
+
+        g.setColour (colour);
+        g.setFont (uiFont (11.5f));
+        g.drawText (doc.line (li).text, ri.withTrimmedLeft (4),
+                    juce::Justification::centredLeft, true);
+
+        if (li == currentIndex)
+        {
+            g.setColour (palette.accent.withAlpha (0.55f));
+            g.drawRoundedRectangle (r, 5.0f, 1.0f);
+        }
+    }
+
+    //---- 某一句的样式卡片 ----
+    if (styleEditIndex >= 0 && styleEditIndex < total)
+    {
+        const auto card = styleCard();
+
+        g.setColour (palette.card.withAlpha (0.97f));
+        g.fillRoundedRectangle (card, 16.0f);
+        g.setColour (palette.text.withAlpha (0.16f));
+        g.drawRoundedRectangle (card, 16.0f, 1.2f);
+
+        drawText (g, juce::Rectangle<float> (card.getX() + 24.0f, card.getY() + 14.0f,
+                                             card.getWidth() - 48.0f, 24.0f),
+                  tr (Lang::TextId::annotateTitle) + "   " + tr (Lang::TextId::annotateLine)
+                    + juce::String (styleEditIndex + 1),
+                  14.0f, palette.accent, true, -1.0f, {}, 1.0f,
+                  juce::Justification::centredLeft);
+
+        // 这一句的原文，作为参照
+        drawText (g, juce::Rectangle<float> (card.getX() + 24.0f, card.getY() + 34.0f,
+                                             card.getWidth() - 48.0f, 16.0f),
+                  processor.lyrics().line (styleEditIndex).text, 10.5f,
+                  palette.faint, false, -1.0f, {}, 1.0f,
+                  juce::Justification::centredLeft);
+
+        // 颜色圆点
+        const auto swatches = styleSwatches (card);
+
+        for (int i = 0; i < static_cast<int> (swatches.size()); ++i)
+        {
+            const auto sw = swatches[(size_t) i];
+            const int  colourIndex = i - 1;          // 0 = 默认
+            const bool sel = (styleEditColour == colourIndex);
+
+            if (colourIndex < 0)
+            {
+                g.setColour (palette.text.withAlpha (0.10f));
+                g.fillEllipse (sw);
+
+                g.setColour (palette.faint);
+                g.drawEllipse (sw.reduced (0.5f), 1.0f);
+                g.drawLine (sw.getX() + 4.0f, sw.getBottom() - 4.0f,
+                            sw.getRight() - 4.0f, sw.getY() + 4.0f, 1.4f);
+            }
+            else
+            {
+                g.setColour (juce::Colour (kLineColours[colourIndex]));
+                g.fillEllipse (sw);
+            }
+
+            if (sel)
+            {
+                g.setColour (palette.text.withAlpha (0.85f));
+                g.drawEllipse (sw.expanded (2.5f), 1.6f);
+            }
         }
     }
 }
@@ -2080,7 +2299,7 @@ void LyricSyncEditor::drawText (juce::Graphics& g, juce::Rectangle<float> area,
                                 const juce::String& text, float size,
                                 juce::Colour colour, bool bold,
                                 float sungProgress, juce::Colour sungColour, float alpha,
-                                juce::Justification just)
+                                juce::Justification just, const juce::String& prefix)
 {
     if (text.isEmpty() || area.isEmpty())
         return;
@@ -2091,6 +2310,13 @@ void LyricSyncEditor::drawText (juce::Graphics& g, juce::Rectangle<float> area,
 
     const int idx = juce::jlimit (0, kNumFonts - 1, fontIndex);
     const int style = bold ? juce::Font::bold : juce::Font::plain;
+
+    // 前置备注（如演唱者名字）：小一号、半透明，和歌词连成一串一起排版
+    const int prefixLen = prefix.isNotEmpty() ? prefix.length() + 2 : 0;
+
+    if (prefixLen > 0)
+        s.append (prefix + "  ", juce::Font (uiTypefaceName(),
+                                             juce::jmax (9.0f, size * 0.62f), style));
 
     if (! typefaceNeedsCjkFallback (idx))
     {
@@ -2121,6 +2347,10 @@ void LyricSyncEditor::drawText (juce::Graphics& g, juce::Rectangle<float> area,
 
     s.setColour (colour.withAlpha (alpha));
 
+    if (prefixLen > 0)
+        s.setColour (juce::Range<int> (0, prefix.length()),
+                     colour.withAlpha (alpha * 0.50f));
+
     if (sungProgress > 0.0f)
     {
         const int total = text.length();
@@ -2128,13 +2358,15 @@ void LyricSyncEditor::drawText (juce::Graphics& g, juce::Rectangle<float> area,
         const float frac = juce::jlimit (0.0f, 1.0f, sungProgress - static_cast<float> (full));
 
         if (full > 0)
-            s.setColour (juce::Range<int> (0, full), sungColour.withAlpha (alpha));
+            s.setColour (juce::Range<int> (prefixLen, prefixLen + full),
+                         sungColour.withAlpha (alpha));
 
         // 正在唱的这个字：底色 → 高亮色按字内进度混合，扫光就是连续的
         if (full < total && frac > 0.001f)
         {
             const auto blend = colour.interpolatedWith (sungColour, frac);
-            s.setColour (juce::Range<int> (full, full + 1), blend.withAlpha (alpha));
+            s.setColour (juce::Range<int> (prefixLen + full, prefixLen + full + 1),
+                         blend.withAlpha (alpha));
         }
     }
 
@@ -2438,6 +2670,21 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
     if (button == &pickImageButton)     { pickBackgroundImage(); return; }
     if (button == &clearImageButton)    { clearBackgroundImage(); return; }
 
+    if (button == &setStartButton)      { setLyricsStart(); return; }
+    if (button == &undoSetStartButton)  { undoSetStart(); return; }
+
+    if (button == &annotateButton)
+    {
+        if (annotateMode) exitAnnotateMode();
+        else              enterAnnotateMode();
+
+        return;
+    }
+
+    if (button == &styleApplyButton)   { applyLineStyle(); return; }
+    if (button == &styleClearButton)   { clearLineStyle(); return; }
+    if (button == &styleCancelButton)  { closeLineStyle(); return; }
+
     if (button == &hintToggle)
     {
         showHints = hintToggle.getToggleState();
@@ -2469,11 +2716,16 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
 
     if (button == &minusButton || button == &plusButton || button == &resetButton)
     {
+        offsetHistory.push_back (offsetMs);
+
+        if (offsetHistory.size() > 60)
+            offsetHistory.erase (offsetHistory.begin());
+
         if (button == &resetButton)  offsetMs = 0.0;
         if (button == &minusButton)  offsetMs -= 100.0;
         if (button == &plusButton)   offsetMs += 100.0;
 
-        offsetMs = juce::jlimit (-60000.0, 60000.0, offsetMs);
+        offsetMs = juce::jlimit (-1800000.0, 1800000.0, offsetMs);
         processor.setSetting (Settings::offsetMs, offsetMs);
         repaint();
     }
@@ -2562,6 +2814,42 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
     {
         if (! settingsPanelArea().contains (toLogical (e.position)))
             showSettings (false);
+
+        return;
+    }
+
+    if (annotateMode)
+    {
+        const auto p = toLogical (e.position);
+
+        if (styleEditIndex >= 0)
+        {
+            const auto swatches = styleSwatches (styleCard());
+
+            for (int i = 0; i < static_cast<int> (swatches.size()); ++i)
+            {
+                if (swatches[(size_t) i].expanded (3.0f).contains (p))
+                {
+                    styleEditColour = i - 1;       // 0 = 默认
+                    repaint();
+                    return;
+                }
+            }
+
+            return;
+        }
+
+        const auto rows = annotateRows (stageArea());
+        const int first = annotateFirstRow();
+
+        for (int i = 0; i < static_cast<int> (rows.size()); ++i)
+        {
+            if (rows[(size_t) i].contains (p))
+            {
+                openLineStyle (first + i);
+                return;
+            }
+        }
 
         return;
     }
@@ -2655,6 +2943,17 @@ void LyricSyncEditor::mouseWheelMove (const juce::MouseEvent& e,
     const auto mods = juce::ModifierKeys::currentModifiers;
     const bool mod = mods.isCtrlDown() || mods.isCommandDown();
 
+    // 标注界面：滚轮翻歌词列表
+    if (annotateMode && styleEditIndex < 0 && ! mod && e.eventComponent == this
+        && stageArea().transformedBy (uiTransform).contains (e.position))
+    {
+        const int total = processor.lyrics().size();
+        annotateScroll = juce::jlimit (0, juce::jmax (0, total - 8),
+                                       annotateScroll + (wheel.deltaY > 0.0f ? -1 : 1));
+        repaint();
+        return;
+    }
+
     // 打轴界面：滚轮直接翻「已记录」列表（不按住 Ctrl）
     if (tapMode && tapEditIndex < 0 && ! mod && e.eventComponent == this
         && stageArea().transformedBy (uiTransform).contains (e.position))
@@ -2730,6 +3029,30 @@ void LyricSyncEditor::mouseMove (const juce::MouseEvent& e)
         return;
     }
 
+    if (annotateMode)
+    {
+        const auto p = juce::Point<float> ((e.position.x - originX) / juce::jmax (0.01f, uiScaleX),
+                                           (e.position.y - originY) / juce::jmax (0.01f, uiScaleY));
+        bool over = false;
+
+        if (styleEditIndex >= 0)
+        {
+            for (const auto& sw : styleSwatches (styleCard()))
+                if (sw.expanded (3.0f).contains (p))
+                    over = true;
+        }
+        else
+        {
+            for (const auto& r : annotateRows (stageArea()))
+                if (r.contains (p))
+                    over = true;
+        }
+
+        setMouseCursor (over ? juce::MouseCursor::PointingHandCursor
+                             : juce::MouseCursor::NormalCursor);
+        return;
+    }
+
     const bool hand = ! editing && ! settingsOpen && ! aboutOpen
                    && stageArea().transformedBy (uiTransform).contains (e.position);
 
@@ -2741,6 +3064,14 @@ bool LyricSyncEditor::keyPressed (const juce::KeyPress& key)
 {
     if (key.getKeyCode() == juce::KeyPress::escapeKey)
     {
+        if (annotateMode)
+        {
+            if (styleEditIndex >= 0) closeLineStyle();
+            else                     exitAnnotateMode();
+
+            return true;
+        }
+
         if (zenMode)      { toggleZenMode(); return true; }
         if (aboutOpen)    { showAbout (false); return true; }
         if (settingsOpen) { showSettings (false); return true; }
@@ -3315,6 +3646,268 @@ void LyricSyncEditor::undoStamp()
     --tapIndex;
     tapTimes[(size_t) tapIndex] = -1.0;
     repaint();
+}
+
+//==============================================================================
+juce::Rectangle<float> LyricSyncEditor::styleCard() const
+{
+    const bool v = (orientation == Orientation::vertical);
+
+    return v ? juce::Rectangle<float> (40.0f, 300.0f, baseW() - 80.0f, 210.0f)
+             : juce::Rectangle<float> (250.0f, 170.0f, 460.0f, 200.0f);
+}
+
+std::vector<juce::Rectangle<float>> LyricSyncEditor::styleSwatches (juce::Rectangle<float> card) const
+{
+    std::vector<juce::Rectangle<float>> out;
+
+    const float d = 22.0f;
+    const float gap = 30.0f;
+    const int   n = kNumLineColours + 1;             // 默认 + 8 色
+    const float totalW = static_cast<float> (n - 1) * gap + d;
+    float x = card.getCentreX() - totalW * 0.5f;
+    const float y = card.getY() + 56.0f;
+
+    for (int i = 0; i < n; ++i)
+    {
+        out.push_back ({ x, y, d, d });
+        x += gap;
+    }
+
+    return out;
+}
+
+std::vector<juce::Rectangle<float>> LyricSyncEditor::annotateRows (juce::Rectangle<float> area) const
+{
+    std::vector<juce::Rectangle<float>> rows;
+
+    const auto& doc = processor.lyrics();
+    const int total = doc.size();
+
+    if (total <= 0 || annotateMode == false)
+        return rows;
+
+    const float rowH = 26.0f;
+    const float top  = area.getY() + 52.0f;
+    const int   fit  = 8;                     // 与 annotateFirstRow 的步长一致
+    const int   first = annotateFirstRow();
+
+    for (int i = 0; i < fit && first + i < total; ++i)
+        rows.push_back ({ area.getX() + 24.0f, top + static_cast<float> (i) * rowH,
+                          area.getWidth() - 48.0f, rowH - 2.0f });
+
+    return rows;
+}
+
+int LyricSyncEditor::annotateFirstRow() const
+{
+    const auto& doc = processor.lyrics();
+    const int total = doc.size();
+    const int fit = 8;
+
+    return juce::jlimit (0, juce::jmax (0, total - fit), annotateScroll);
+}
+
+void LyricSyncEditor::enterAnnotateMode()
+{
+    if (editing || tapMode)
+        return;
+
+    annotateMode = true;
+    styleEditIndex = -1;
+    annotateScroll = juce::jmax (0, currentIndex - 2);
+    lastWarning = {};
+    annotateButton.setButtonText (tr (Lang::TextId::tapFinish));
+
+    updateVisibility();
+    resized();
+    repaint();
+}
+
+void LyricSyncEditor::exitAnnotateMode()
+{
+    annotateMode = false;
+    styleEditIndex = -1;
+    annotateButton.setButtonText (tr (Lang::TextId::annotate));
+
+    updateVisibility();
+    resized();
+    repaint();
+}
+
+void LyricSyncEditor::openLineStyle (int index)
+{
+    const auto& doc = processor.lyrics();
+
+    if (index < 0 || index >= doc.size())
+        return;
+
+    styleEditIndex = index;
+
+    const auto it = lineStyles.find (index);
+    styleEditColour = (it == lineStyles.end()) ? -1 : it->second.colourIndex;
+    styleNoteEditor.setText (it == lineStyles.end() ? juce::String() : it->second.note, false);
+
+    updateVisibility();
+    resized();
+    repaint();
+}
+
+void LyricSyncEditor::applyLineStyle()
+{
+    if (styleEditIndex < 0)
+        return;
+
+    LineStyle st;
+    st.colourIndex = styleEditColour;
+    st.note = styleNoteEditor.getText().trim();
+
+    if (st.colourIndex < 0 && st.note.isEmpty())
+        lineStyles.erase (styleEditIndex);
+    else
+        lineStyles[styleEditIndex] = st;
+
+    saveLineStyles();
+    closeLineStyle();
+}
+
+void LyricSyncEditor::clearLineStyle()
+{
+    if (styleEditIndex >= 0)
+        lineStyles.erase (styleEditIndex);
+
+    saveLineStyles();
+    closeLineStyle();
+}
+
+void LyricSyncEditor::closeLineStyle()
+{
+    styleEditIndex = -1;
+    styleNoteEditor.setText ({}, false);
+
+    updateVisibility();
+    resized();
+    repaint();
+}
+
+//==============================================================================
+void LyricSyncEditor::setLyricsStart()
+{
+    const double pos = demoMode ? demoTime
+                                : processor.positionSeconds.load();
+
+    if (! std::isfinite (pos) || pos < 0.0)
+        return;
+
+    offsetHistory.push_back (offsetMs);
+
+    if (offsetHistory.size() > 60)
+        offsetHistory.erase (offsetHistory.begin());
+
+    // 把「当前播放位置」当成歌词时间轴的 0 秒
+    offsetMs = juce::jlimit (-1800000.0, 1800000.0, -pos * 1000.0);
+    processor.setSetting (Settings::offsetMs, offsetMs);
+
+    // 音频块挪过位置，之前测到的音频长度已经不对了
+    resetAudioMeasurement();
+
+    lastWarning = tr (Lang::TextId::setStartDone) + "  " + formatTimecode (pos);
+    repaint();
+}
+
+void LyricSyncEditor::undoSetStart()
+{
+    if (offsetHistory.empty())
+    {
+        lastWarning = tr (Lang::TextId::setStartNone);
+        repaint();
+        return;
+    }
+
+    offsetMs = offsetHistory.back();
+    offsetHistory.pop_back();
+
+    processor.setSetting (Settings::offsetMs, offsetMs);
+    lastWarning = tr (Lang::TextId::setStartUndo) + "  " + juce::String (offsetMs, 0) + " ms";
+    repaint();
+}
+
+//==============================================================================
+juce::Colour LyricSyncEditor::lineColourFor (int index, juce::Colour fallback) const
+{
+    const auto it = lineStyles.find (index);
+
+    if (it == lineStyles.end() || it->second.colourIndex < 0)
+        return fallback;
+
+    return juce::Colour (kLineColours[juce::jlimit (0, kNumLineColours - 1,
+                                                    it->second.colourIndex)]);
+}
+
+juce::String LyricSyncEditor::lineNoteFor (int index) const
+{
+    const auto it = lineStyles.find (index);
+
+    return it == lineStyles.end() ? juce::String() : it->second.note;
+}
+
+void LyricSyncEditor::saveLineStyles()
+{
+    juce::StringArray items;
+
+    for (const auto& kv : lineStyles)
+    {
+        if (kv.second.colourIndex < 0 && kv.second.note.isEmpty())
+            continue;
+
+        juce::MemoryBlock mb;
+        const auto utf8 = kv.second.note.toRawUTF8();
+        mb.append (utf8, kv.second.note.getNumBytesAsUTF8());
+
+        const auto b64 = juce::Base64::toBase64 (mb.getData(), mb.getSize());
+
+        items.add (juce::String (kv.first) + "=" + juce::String (kv.second.colourIndex)
+                   + "|" + b64);
+    }
+
+    processor.setSetting (Settings::lineStyles, items.joinIntoString (";"));
+}
+
+void LyricSyncEditor::loadLineStyles()
+{
+    lineStyles.clear();
+
+    const auto text = processor.getSetting (Settings::lineStyles, "").toString();
+
+    for (const auto& item : juce::StringArray::fromTokens (text, ";", ""))
+    {
+        if (item.isEmpty())
+            continue;
+
+        const int eq = item.indexOfChar ('=');
+
+        if (eq <= 0)
+            continue;
+
+        const int index = item.substring (0, eq).getIntValue();
+        auto rest = item.substring (eq + 1);
+        const int bar = rest.indexOfChar ('|');
+
+        LineStyle st;
+        st.colourIndex = (bar >= 0 ? rest.substring (0, bar) : rest).getIntValue();
+
+        if (bar >= 0)
+        {
+            const auto b64 = rest.substring (bar + 1);
+            juce::MemoryBlock mb;
+
+            if (juce::Base64::convertFromBase64 (mb, b64) && mb.getSize() > 0)
+                st.note = juce::String::fromUTF8 (static_cast<const char*> (mb.getData()),
+                                                  static_cast<int> (mb.getSize()));
+        }
+
+        lineStyles[index] = st;
+    }
 }
 
 void LyricSyncEditor::armTapLine (int index)
