@@ -116,6 +116,7 @@ namespace Lang
         annotateNote,
         annotateDefault,
         annotateClear,
+        annotateApplyNote,
         annotateHint,
         annotateNotePlaceholder,
         tipTapNudge,

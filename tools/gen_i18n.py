@@ -23,8 +23,8 @@ from pathlib import Path
 # key, Chinese, English
 # ---------------------------------------------------------------------------
 TABLE = [
-    ("appSubtitle",      "DAW 歌词同步  |  跟随宿主播放头",
-                         "DAW lyrics  |  follows the host playhead"),
+    ("appSubtitle",      "DAW 歌词同步",
+                         "DAW lyrics"),
     ("currentLine",      "CURRENT LINE", "CURRENT LINE"),
     ("loadLyrics",       "载入歌词", "Load Lyrics"),
     ("pasteEdit",        "粘贴 / 编辑", "Paste / Edit"),
@@ -151,16 +151,17 @@ TABLE = [
 
     #--- 逐句颜色与备注 -----------------------------------------------------
     ("annotate",        "着色备注", "Style"),
-    ("tipAnnotate",     "刷子图标：点开后光标变 I 形，在原歌词界面拖选句子，右键即可在鼠标旁设置颜色与备注",
-                        "Brush: click it, the cursor becomes an I-beam, drag to select lines in the lyric view, then right-click for the colour/note box") ,
+    ("tipAnnotate",     "刷子图标：点开后光标变 I 形，在原歌词界面拖选句子，右键在鼠标旁设置；点颜色立即生效，备注需点应用",
+                        "Brush: I-beam cursor, drag to select lines in the lyric view, right-click for the box; colours apply instantly, notes need Apply") ,
     ("annotateTitle",   "着色与备注", "Colour and note"),
     ("annotateLine",    "第 ", "Line "),
     ("annotateColour",  "颜色", "Colour"),
     ("annotateNote",    "备注", "Note"),
     ("annotateDefault", "默认", "Default"),
     ("annotateClear",   "清除", "Clear"),
-    ("annotateHint",    "拖选歌词（可跨行）→ 右键打开小选择框；滚轮翻歌词，Esc 退出",
-                        "Drag to select lines (multi-line OK), right-click for the small box; wheel scrolls, Esc exits"),
+    ("annotateApplyNote", "应用备注", "Apply note"),
+    ("annotateHint",    "拖选歌词（可跨行）→ 右键打开小选择框；点颜色立即生效，备注需点应用；滚轮翻歌词，Esc 退出",
+                        "Drag to select lines, right-click for the box; colours apply instantly, notes need Apply; wheel scrolls, Esc exits"),
     ("annotateNotePlaceholder", "例如：李三", "e.g. Li San"),
     ("tipTapNudge",      "微调刚打好的上一句时间（10 毫秒一步）",
                          "Nudge the last stamped line by 10 ms"),

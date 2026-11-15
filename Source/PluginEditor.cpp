@@ -10,7 +10,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.8.2";
+    const char* const kVersion = "1.8.3";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -697,7 +697,10 @@ void LyricSyncEditor::syncControlsFromSettings()
     offsetMs  = static_cast<double> (processor.getSetting (Settings::offsetMs, 0.0));
     fontScale = static_cast<double> (processor.getSetting (Settings::fontScale, 1.0));
     language  = juce::jlimit (0, 1, static_cast<int> (processor.getSetting (Settings::language, 0)));
-    demoMode  = static_cast<bool>  (processor.getSetting (Settings::demoClock, false));
+    // 「手动预览」入口已从主界面移除，内部模拟播放头不再启用，
+    // 避免旧工程里残留的 demoClock 设置让插件一直停在预览模式。
+    demoMode = false;
+    processor.setSetting (Settings::demoClock, false);
 
     // 外观（皮肤 / 背景图 / 字体 / 歌词颜色 / 比例 / 版型）以全局偏好为准。
     // 工程状态里也存了这些，但只要偏好文件存在就优先用它 —— 否则删掉插件重新加载、
@@ -805,7 +808,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     undoSetStartButton.setButtonText (tr (Lang::TextId::undoSetStart));
     annotateButton   .setButtonText (tr (annotateMode ? Lang::TextId::tapFinish
                                                       : Lang::TextId::annotate));
-    styleApplyButton .setButtonText (tr (Lang::TextId::tapRowApply));
+    styleApplyButton .setButtonText (tr (Lang::TextId::annotateApplyNote));
     styleClearButton .setButtonText (tr (Lang::TextId::annotateClear));
     styleCancelButton.setButtonText (tr (Lang::TextId::cancel));
 
@@ -952,7 +955,7 @@ void LyricSyncEditor::refreshLookAndFeel()
     l.setColour (juce::TooltipWindow::textColourId,       palette.text);
     l.setColour (juce::TooltipWindow::outlineColourId,    palette.panelEdge);
 
-    offsetLabel.setColour (juce::Label::textColourId, palette.accent);
+    offsetLabel.setColour (juce::Label::textColourId, palette.dim);
     offsetLabel.setColour (juce::Label::backgroundColourId, palette.card);
     hintLabel.setColour (juce::Label::textColourId, palette.faint);
     fileLabel.setColour (juce::Label::textColourId, palette.dim);
@@ -996,22 +999,23 @@ void LyricSyncEditor::updateVisibility()
 
     for (auto* c : { static_cast<juce::Component*> (&loadButton),
                      static_cast<juce::Component*> (&pasteButton),
-                     static_cast<juce::Component*> (&demoButton),
                      static_cast<juce::Component*> (&minusButton),
                      static_cast<juce::Component*> (&plusButton),
                      static_cast<juce::Component*> (&resetButton),
                      static_cast<juce::Component*> (&offsetLabel),
                      static_cast<juce::Component*> (&fontLabel),
                      static_cast<juce::Component*> (&fontSlider),
-                     static_cast<juce::Component*> (&demoClockToggle),
                      static_cast<juce::Component*> (&measureButton),
                      static_cast<juce::Component*> (&exportButton),
                      static_cast<juce::Component*> (&retempoButton),
                      static_cast<juce::Component*> (&gearButton) })
         c->setVisible (normal);
 
-    demoPlayButton .setVisible (normal && demoMode);
-    demoStopButton .setVisible (normal && demoMode);
+    // 已下线的「示例歌词」与「手动预览」：一律不显示
+    demoButton      .setVisible (false);
+    demoClockToggle .setVisible (false);
+    demoPlayButton  .setVisible (false);
+    demoStopButton  .setVisible (false);
 
     setStartButton   .setVisible (normal);
     undoSetStartButton.setVisible (normal);
@@ -1129,8 +1133,17 @@ void LyricSyncEditor::updateScaledFonts()
 
 void LyricSyncEditor::applyWindowSize()
 {
-    const int w = juce::roundToInt (baseW() * static_cast<float> (zoomPercent) / 100.0f);
-    const int h = juce::roundToInt (baseH() * static_cast<float> (zoomPercent) / 100.0f);
+    // 全屏纯享时窗口尺寸由宿主/用户控制，不要在这里重设。
+    if (zenMode)
+        return;
+
+    // 用版型的「基准尺寸」定窗口，而不是拿当前窗口比例去反推 baseW()。
+    // 否则从横版切到竖版时会沿用 16:10 的宽比例，竖版看起来只是放大的横版。
+    // 横版 960×600，竖版 600×900（2:3 竖长），再乘缩放档位。
+    const float bw = (orientation == Orientation::vertical) ? vBaseW : hBaseW;
+    const float bh = (orientation == Orientation::vertical) ? vBaseH : hBaseH;
+    const int w = juce::roundToInt (bw * static_cast<float> (zoomPercent) / 100.0f);
+    const int h = juce::roundToInt (bh * static_cast<float> (zoomPercent) / 100.0f);
     setSize (w, h);
 }
 
@@ -1210,7 +1223,7 @@ void LyricSyncEditor::resized()
         {
             place (loadButton, 92);
             place (pasteButton, 104);
-            place (demoButton, 88);
+            place (annotateButton, 96);          // 刷子按钮占原来「示例歌词」的位置
             x += 14.0f;
             place (minusButton, 30);
             place (offsetLabel, 84);
@@ -1219,11 +1232,6 @@ void LyricSyncEditor::resized()
             x += 14.0f;
             place (fontLabel, 34);
             fontSlider.setBounds (scaledRect (x, 486, 100, 22));
-            x += 108.0f;
-            demoClockToggle.setBounds (scaledRect (x, 484, 108, 26));
-            x += 116.0f;
-            demoPlayButton.setBounds (scaledRect (x, 482, 34, 30));
-            demoStopButton.setBounds (scaledRect (x + 40.0f, 482, 34, 30));
             measureButton.setBounds (scaledRect (682, 538, 110, 26));
             exportButton .setBounds (scaledRect (800, 538, 138, 26));
         }
@@ -1235,7 +1243,6 @@ void LyricSyncEditor::resized()
 
         setStartButton   .setBounds (scaledRect (22, 568, 92, 26));
         undoSetStartButton.setBounds (scaledRect (122, 568, 68, 26));
-        annotateButton   .setBounds (scaledRect (198, 568, 96, 26));
 
     }
     else
@@ -1269,7 +1276,7 @@ void LyricSyncEditor::resized()
         {
             loadButton .setBounds (scaledRect (ox + 22, 644, 176, 30));
             pasteButton.setBounds (scaledRect (ox + 206, 644, 176, 30));
-            demoButton .setBounds (scaledRect (ox + 390, 644, 176, 30));
+            annotateButton.setBounds (scaledRect (ox + 390, 644, 176, 30));
 
             minusButton .setBounds (scaledRect (ox + 22, 682, 56, 30));
             offsetLabel .setBounds (scaledRect (ox + 86, 682, 120, 30));
@@ -1278,15 +1285,11 @@ void LyricSyncEditor::resized()
             fontLabel   .setBounds (scaledRect (ox + 382, 686, 40, 22));
             fontSlider  .setBounds (scaledRect (ox + 426, 686, 140, 22));
 
-            demoClockToggle.setBounds (scaledRect (ox + 22, 720, 176, 30));
-            demoPlayButton .setBounds (scaledRect (ox + 206, 720, 60, 30));
-            demoStopButton .setBounds (scaledRect (ox + 274, 720, 60, 30));
-            measureButton  .setBounds (scaledRect (ox + 342, 720, 150, 30));
+            measureButton.setBounds (scaledRect (ox + 22, 720, 176, 30));
         }
 
         setStartButton   .setBounds (scaledRect (ox + 22, 756, 176, 28));
         undoSetStartButton.setBounds (scaledRect (ox + 206, 756, 176, 28));
-        annotateButton   .setBounds (scaledRect (ox + 390, 756, 176, 28));
 
         fileLabel .setBounds (scaledRect (22, 794, baseW() - 44.0f, 22));
         hintLabel .setBounds (scaledRect (22, 818, baseW() - 44.0f, 20));
@@ -2142,32 +2145,26 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
         }
     }
 
-    //---- 列表滚动条 -----------------------------------------------------
+    //---- 列表滚动条（滑块可点、可上下拖） ---------------------------------
     {
         const auto track = tapListTrack (area);
 
         if (! track.isEmpty())
         {
-            int total = 0;
-
-            for (auto v : tapTimes)
-                if (v >= 0.0)
-                    ++total;
-
-            const int maxRows = v ? 4 : 7;
-            const int maxScroll = juce::jmax (1, total - maxRows);
+            const auto thumb = tapListThumb (area);
 
             g.setColour (palette.text.withAlpha (0.10f));
-            g.fillRoundedRectangle (track, 3.0f);
+            g.fillRoundedRectangle (track, 4.0f);
 
-            const float frac = juce::jlimit (0.15f, 1.0f,
-                                             static_cast<float> (maxRows) / static_cast<float> (total));
-            const float thumbH = juce::jmax (20.0f, track.getHeight() * frac);
-            const float t01 = 1.0f - static_cast<float> (tapListScroll) / static_cast<float> (maxScroll);
-            const float thumbY = track.getY() + (track.getHeight() - thumbH) * juce::jlimit (0.0f, 1.0f, t01);
+            g.setColour (palette.accent.withAlpha (tapListDragging ? 0.95f : 0.65f));
+            g.fillRoundedRectangle (thumb, 4.0f);
 
-            g.setColour (palette.accent.withAlpha (0.65f));
-            g.fillRoundedRectangle (track.withY (thumbY).withHeight (thumbH), 3.0f);
+            // 滑块里两道细纹，提示"这里可以拖"
+            g.setColour (palette.text.withAlpha (0.35f));
+            const float cx = thumb.getCentreX();
+            const float cy = thumb.getCentreY();
+            g.drawLine (cx - 2.0f, cy - 3.0f, cx + 2.0f, cy - 3.0f, 1.0f);
+            g.drawLine (cx - 2.0f, cy + 3.0f, cx + 2.0f, cy + 3.0f, 1.0f);
         }
     }
 
@@ -2222,8 +2219,8 @@ void LyricSyncEditor::paintInfoLine (juce::Graphics& g)
     juce::AttributedString s;
     s.setJustification (juce::Justification::centredRight);
     s.append (bpmText, uiFont (14.0f, true));
-    s.setColour (juce::Range<int> (0, bpmText.length()),
-                 detectedBpm > 0.0 ? palette.accent : palette.faint);
+    // 与「音频 0:13」「字号」等读数统一用中性文字色，不再跟强调色变成青绿
+    s.setColour (juce::Range<int> (0, bpmText.length()), palette.dim);
 
     const juce::Graphics::ScopedSaveState state (g);
     s.draw (g, area);
@@ -2866,6 +2863,7 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
                 if (swatches[(size_t) i].expanded (3.0f).contains (p))
                 {
                     styleEditColour = i - 1;       // 0 = 默认
+                    applyColourToSelection (styleEditColour);
                     repaint();
                     return;
                 }
@@ -2923,25 +2921,32 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
         const auto ids  = tapListIndices();
         const auto p = toLogical (e.position);
 
-        // 点滚动条：按位置跳
+        // 点滚动条：抓住滑块就能上下拖；点轨道则先把滑块移到该处再拖
         const auto track = tapListTrack (stageArea());
+        // 向右扩出一段好点的热区，但别越过行的右缘去抢「重打」按钮的点击
+        const auto hit = juce::Rectangle<float> (track.getX() - 2.0f, track.getY(),
+                                                 track.getWidth() + 12.0f,
+                                                 track.getHeight());
 
-        if (! track.isEmpty() && track.expanded (4.0f, 0.0f).contains (p))
+        if (! track.isEmpty() && hit.contains (p))
         {
-            int total = 0;
+            const auto thumb = tapListThumb (stageArea());
+            const int  maxScroll = tapListMaxScroll();
+            const float usable = juce::jmax (1.0f, track.getHeight() - thumb.getHeight());
 
-            for (auto v : tapTimes)
-                if (v >= 0.0)
-                    ++total;
+            if (! thumb.expanded (4.0f, 0.0f).contains (p))
+            {
+                // 轨道点击：让滑块中心对准鼠标
+                const float centre = p.y - track.getY() - thumb.getHeight() * 0.5f;
+                const float t01 = juce::jlimit (0.0f, 1.0f, centre / usable);
+                tapListScroll = juce::jlimit (0, maxScroll,
+                    juce::roundToInt ((1.0f - t01) * static_cast<float> (maxScroll)));
+            }
 
-            const bool vv = (orientation == Orientation::vertical);
-            const int  maxRows = vv ? 4 : 7;
-            const int  maxScroll = juce::jmax (0, total - maxRows);
-            const float f = juce::jlimit (0.0f, 1.0f,
-                                          (p.y - track.getY()) / juce::jmax (1.0f, track.getHeight()));
-
-            tapListScroll = juce::jlimit (0, maxScroll,
-                                          static_cast<int> (std::lround ((1.0f - f) * maxScroll)));
+            tapListDragging = true;
+            tapDragStartY = p.y;
+            tapDragStartScroll = tapListScroll;
+            setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
             repaint();
             return;
         }
@@ -2976,6 +2981,31 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 
 void LyricSyncEditor::mouseDrag (const juce::MouseEvent& e)
 {
+    if (tapListDragging && e.eventComponent == this)
+    {
+        const auto area = stageArea();
+        const auto p = juce::Point<float> ((e.position.x - originX) / juce::jmax (0.01f, uiScaleX),
+                                           (e.position.y - originY) / juce::jmax (0.01f, uiScaleY));
+        const auto track = tapListTrack (area);
+        const auto thumb = tapListThumb (area);
+        const int maxScroll = tapListMaxScroll();
+        const float usable = juce::jmax (1.0f, track.getHeight() - thumb.getHeight());
+
+        // 往上拖 = 往回翻旧句子；位移换算成「行」
+        const float deltaRows = (tapDragStartY - p.y) / usable
+                              * static_cast<float> (maxScroll);
+        const int next = juce::jlimit (0, maxScroll,
+            juce::roundToInt (static_cast<float> (tapDragStartScroll) + deltaRows));
+
+        if (next != tapListScroll)
+        {
+            tapListScroll = next;
+            repaint();
+        }
+
+        return;
+    }
+
     if (annotateDragging && e.eventComponent == this)
     {
         const auto p = juce::Point<float> ((e.position.x - originX) / juce::jmax (0.01f, uiScaleX),
@@ -3076,6 +3106,13 @@ void LyricSyncEditor::mouseWheelMove (const juce::MouseEvent& e,
 
 void LyricSyncEditor::mouseUp (const juce::MouseEvent&)
 {
+    if (tapListDragging)
+    {
+        tapListDragging = false;
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+        repaint();
+    }
+
     if (annotateDragging)
     {
         annotateDragging = false;
@@ -3097,9 +3134,22 @@ void LyricSyncEditor::mouseMove (const juce::MouseEvent& e)
 
     if (tapMode)
     {
-        const auto rows = tapListRows (stageArea());
+        const auto area = stageArea();
+        const auto rows = tapListRows (area);
         const auto p = juce::Point<float> ((e.position.x - originX) / juce::jmax (0.01f, uiScaleX),
                                            (e.position.y - originY) / juce::jmax (0.01f, uiScaleY));
+
+        // 停在滚动条滑块/轨道上：给上下拖动的光标，提示它可以拖
+        const auto track = tapListTrack (area);
+        const auto hit = juce::Rectangle<float> (track.getX() - 2.0f, track.getY(),
+                                                 track.getWidth() + 12.0f,
+                                                 track.getHeight());
+
+        if (! track.isEmpty() && hit.contains (p))
+        {
+            setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+            return;
+        }
 
         for (const auto& r : rows)
             if (r.contains (p))
@@ -3899,26 +3949,66 @@ void LyricSyncEditor::openLineStyle (int index)
     repaint();
 }
 
+void LyricSyncEditor::applyColourToSelection (int colourIndex)
+{
+    if (styleEditIndex < 0)
+        return;
+
+    const int lo = (annotateSelLo >= 0 ? annotateSelLo : styleEditIndex);
+    const int hi = (annotateSelHi >= lo ? annotateSelHi : lo);
+    const int total = processor.lyrics().size();
+
+    // 颜色立刻写进歌词，但保留这一句原有的备注
+    for (int i = lo; i <= hi && i < total; ++i)
+    {
+        const auto it = lineStyles.find (i);
+        const juce::String note = (it == lineStyles.end()) ? juce::String()
+                                                           : it->second.note;
+
+        if (colourIndex < 0 && note.isEmpty())
+        {
+            lineStyles.erase (i);
+        }
+        else
+        {
+            LineStyle st;
+            st.colourIndex = colourIndex;
+            st.note = note;
+            lineStyles[i] = st;
+        }
+    }
+
+    saveLineStyles();
+}
+
 void LyricSyncEditor::applyLineStyle()
 {
     if (styleEditIndex < 0)
         return;
 
-    LineStyle st;
-    st.colourIndex = styleEditColour;
-    st.note = styleNoteEditor.getText().trim();
+    // 只有备注需要点「应用」；颜色在点色块时已经生效，这里保留原样
+    const juce::String note = styleNoteEditor.getText().trim();
 
-    // 拖选了多行就整段一起应用
     const int lo = (annotateSelLo >= 0 ? annotateSelLo : styleEditIndex);
     const int hi = (annotateSelHi >= lo ? annotateSelHi : lo);
     const int total = processor.lyrics().size();
 
     for (int i = lo; i <= hi && i < total; ++i)
     {
-        if (st.colourIndex < 0 && st.note.isEmpty())
+        const auto it = lineStyles.find (i);
+        const int colourIndex = (it == lineStyles.end()) ? -1 : it->second.colourIndex;
+
+        if (colourIndex < 0 && note.isEmpty())
+        {
             lineStyles.erase (i);
+        }
         else
+        {
+            LineStyle st;
+            st.colourIndex = colourIndex;
+            st.note = note;
             lineStyles[i] = st;
+        }
     }
 
     saveLineStyles();
@@ -4479,8 +4569,46 @@ juce::Rectangle<float> LyricSyncEditor::tapListTrack (juce::Rectangle<float> are
     const float top  = area.getY() + 52.0f;
     const float h    = static_cast<float> (ids.size()) * rowH;
 
-    return v ? juce::Rectangle<float> (area.getRight() - 30.0f, top, 6.0f, h)
-             : juce::Rectangle<float> (area.getRight() - 26.0f, top, 6.0f, h);
+    // 滑块加宽到 9 px，抓起来更容易（行右缘正好也停在 right-30）
+    return { area.getRight() - 30.0f, top, 9.0f, h };
+}
+
+int LyricSyncEditor::tapListTotal() const
+{
+    int total = 0;
+
+    for (auto t : tapTimes)
+        if (t >= 0.0)
+            ++total;
+
+    return total;
+}
+
+int LyricSyncEditor::tapListMaxScroll() const
+{
+    const int maxRows = (orientation == Orientation::vertical) ? 4 : 7;
+    return juce::jmax (0, tapListTotal() - maxRows);
+}
+
+juce::Rectangle<float> LyricSyncEditor::tapListThumb (juce::Rectangle<float> area) const
+{
+    const auto track = tapListTrack (area);
+
+    if (track.isEmpty())
+        return {};
+
+    const int maxRows = (orientation == Orientation::vertical) ? 4 : 7;
+    const int total = juce::jmax (1, tapListTotal());
+    const int maxScroll = juce::jmax (1, tapListMaxScroll());
+
+    const float frac = juce::jlimit (0.15f, 1.0f,
+                                     static_cast<float> (maxRows) / static_cast<float> (total));
+    const float thumbH = juce::jmax (20.0f, track.getHeight() * frac);
+    const float t01 = 1.0f - static_cast<float> (tapListScroll) / static_cast<float> (maxScroll);
+    const float thumbY = track.getY()
+                       + (track.getHeight() - thumbH) * juce::jlimit (0.0f, 1.0f, t01);
+
+    return track.withY (thumbY).withHeight (thumbH);
 }
 
 void LyricSyncEditor::syncTapToPlayhead (double t)

@@ -184,7 +184,8 @@ private:
     void enterAnnotateMode();             // 进入"着色与备注"模式（就地选择，不切界面）
     void exitAnnotateMode();
     void openLineStyle (int index);       // 右键后在鼠标旁打开小选择框
-    void applyLineStyle();
+    void applyColourToSelection (int colourIndex);   // 点色块：颜色立即生效
+    void applyLineStyle();                // 点应用：备注才写入
     void clearLineStyle();
     void closeLineStyle();
     void paintAnnotateOverlay (juce::Graphics& g, juce::Rectangle<float> area);
@@ -210,6 +211,9 @@ private:
     std::vector<juce::Rectangle<float>> tapListRows (juce::Rectangle<float> area) const;
     std::vector<int> tapListIndices() const;      // 已记录行的行号（与 tapListRows 一一对应）
     juce::Rectangle<float> tapListTrack (juce::Rectangle<float> area) const;  // 列表右侧滚动条
+    juce::Rectangle<float> tapListThumb (juce::Rectangle<float> area) const;  // 可拖动的滑块
+    int  tapListTotal() const;            // 已打点总行数
+    int  tapListMaxScroll() const;        // 最多能往回翻几行
     juce::Rectangle<float> tapRowArmButton (juce::Rectangle<float> row) const; // 列表行右侧「重打」热区
     void scrollTapList (int deltaRows);
     void syncTapToPlayhead (double t);   // 宿主跳转时间后，把打轴指针挪到对应那一句
@@ -341,6 +345,9 @@ private:
     int  tapEditIndex = -1;               // >=0 表示正在编辑某一行
     int  tapArmIndex = -1;                // >=0 表示已预备重打第 N 句，下一次打点只写这一句
     int  tapListScroll = 0;               // 列表往回翻了几行（0 = 停在最新）
+    bool tapListDragging = false;         // 正抓住滚动条滑块上下拖
+    float tapDragStartY = 0.0f;           // 拖动起点（逻辑坐标）
+    int  tapDragStartScroll = 0;
     double tapFollowTime = -1.0;          // 上一帧的播放位置，用来识别"跳转"
 
     //---- Audio length -------------------------------------------------------
