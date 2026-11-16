@@ -273,6 +273,7 @@ private:
     void showAbout (bool shouldShow);
     void applyUiText (bool reloadDemoLyrics);
     void refreshLookAndFeel();
+    void styleSidebarControls();   // 侧栏控件统一成扁平深色（忽略皮肤的高亮底）
     void syncControlsFromSettings();
     void updateVisibility();
     void updateLabels (double t);
