@@ -147,6 +147,10 @@ private:
 
     //---- Painting -----------------------------------------------------------
     void paintHeader (juce::Graphics& g);
+    void paintSidebar (juce::Graphics& g);
+    float railWidth() const;
+    juce::Rectangle<float> railToggleRect() const;
+    void toggleSidebar();
     void paintStage  (juce::Graphics& g, juce::Rectangle<float> area);
     void paintTapStage (juce::Graphics& g, juce::Rectangle<float> area);
     void paintSettings (juce::Graphics& g, juce::Rectangle<float> panel);
@@ -351,6 +355,7 @@ private:
 
     //---- 在线搜歌词 ---------------------------------------------------------
     //---- Standalone 独立版走带 ----------------------------------------------
+    bool   sidebarCollapsed = false;   // 左侧功能栏是否收起（写进全局偏好）
     bool   standaloneMode = false;          // 运行时检测：只有独立版显示走带控件
     bool   standaloneSeekDragging = false;
 
