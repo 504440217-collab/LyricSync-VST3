@@ -11,6 +11,7 @@
   #define NOMINMAX
  #endif
  #include <windows.h>
+ #include <winhttp.h>
 #endif
 
 namespace OnlineLyrics
@@ -22,7 +23,7 @@ namespace
         "Referer: https://www.kugou.com/\r\n";
 
     const char* const kLrclibHeaders =
-        "User-Agent: LyricSync/1.9.1 (local VST3 lyrics plugin)\r\n"
+        "User-Agent: LyricSync/1.9.4 (local VST3 lyrics plugin)\r\n"
         "Accept: application/json\r\n";
 
     /** 自己按 UTF-8 字节做 percent-encode，避免 JUCE addEscapeChars 的版本差异。 */
@@ -55,10 +56,191 @@ namespace
         return juce::String::fromUTF8 (out.c_str(), static_cast<int> (out.size()));
     }
 
-    juce::String httpGet (const juce::String& url, const juce::String& headers,
-                          int& status, int timeoutMs = 7000)
+    juce::String stepDiag (const char* tag, int status, int err)
+    {
+        juce::String s (tag);
+        s << status;
+
+        if (err != 0)
+            s << "e" << err;
+
+        return s;
+    }
+
+#if JUCE_WINDOWS
+    struct HttpTarget
+    {
+        bool secure = false;
+        int  port = 80;
+        juce::String host, path;
+
+        /** 自己拆 http(s) URL：不让 JUCE 的 URL 再编码一次已经 %XX 化的查询串。 */
+        bool parse (const juce::String& url)
+        {
+            auto s = url.trim();
+
+            if (s.startsWithIgnoreCase ("https://"))      { secure = true;  s = s.substring (8); port = 443; }
+            else if (s.startsWithIgnoreCase ("http://"))  { secure = false; s = s.substring (7); port = 80; }
+            else return false;
+
+            const int slash = s.indexOfChar ('/');
+            auto authority = slash >= 0 ? s.substring (0, slash) : s;
+            path = slash >= 0 ? s.substring (slash) : juce::String ("/");
+
+            const int colon = authority.indexOfChar (':');
+
+            if (colon >= 0)
+            {
+                port = authority.substring (colon + 1).getIntValue();
+                authority = authority.substring (0, colon);
+            }
+
+            host = authority;
+            return host.isNotEmpty() && port > 0;
+        }
+    };
+
+    /**
+     *  WinHTTP 直连实现。
+     *
+     *  为什么不用 juce::URL：它走 WinINet 的 PRECONFIG，会继承系统/IE 的代理与 PAC 设置。
+     *  机器上装过代理软件、残留了 127.0.0.1:10808 之类的配置后，插件进程里
+     *  所有请求都会静默失败（HTTP 状态一直是 0，看不出原因）。这里显式 NO_PROXY
+     *  直连，并把 WinHTTP 的错误码带出来（12007 解析失败 / 12029 连不上 / 时间超时等）。
+     */
+    juce::String winHttpGet (const juce::String& url, const juce::String& headers,
+                             int& status, int& err, int timeoutMs)
     {
         status = 0;
+        err = 0;
+
+        HttpTarget target;
+
+        if (! target.parse (url))
+        {
+            err = -1;
+            return {};
+        }
+
+        HINTERNET session = WinHttpOpen (L"LyricSync/1.9.4 (VST3 lyrics plugin)",
+                                         WINHTTP_ACCESS_TYPE_NO_PROXY,
+                                         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+
+        if (session == nullptr)
+        {
+            err = static_cast<int> (GetLastError());
+            return {};
+        }
+
+        WinHttpSetTimeouts (session, timeoutMs, timeoutMs, timeoutMs, timeoutMs);
+
+        {
+            DWORD protocols = 0x00000800 | 0x00002000;      // TLS 1.2 + TLS 1.3
+            WinHttpSetOption (session, WINHTTP_OPTION_SECURE_PROTOCOLS,
+                              &protocols, sizeof (protocols));
+        }
+
+        std::string bytes;
+
+        HINTERNET connect = WinHttpConnect (session, target.host.toWideCharPointer(),
+                                            static_cast<INTERNET_PORT> (target.port), 0);
+
+        if (connect != nullptr)
+        {
+            HINTERNET request = WinHttpOpenRequest (connect, L"GET",
+                                                    target.path.toWideCharPointer(),
+                                                    nullptr, WINHTTP_NO_REFERER,
+                                                    WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                                    target.secure ? WINHTTP_FLAG_SECURE : 0);
+
+            if (request != nullptr)
+            {
+                if (headers.isNotEmpty())
+                    WinHttpAddRequestHeaders (request, headers.toWideCharPointer(),
+                                              static_cast<DWORD> (-1),
+                                              WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
+
+                if (WinHttpSendRequest (request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                                        WINHTTP_NO_REQUEST_DATA, 0, 0, 0)
+                    && WinHttpReceiveResponse (request, nullptr))
+                {
+                    DWORD code = 0, size = sizeof (code);
+
+                    if (WinHttpQueryHeaders (request,
+                                             WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                                             WINHTTP_HEADER_NAME_BY_INDEX, &code, &size,
+                                             WINHTTP_NO_HEADER_INDEX))
+                        status = static_cast<int> (code);
+
+                    for (;;)
+                    {
+                        DWORD avail = 0;
+
+                        if (! WinHttpQueryDataAvailable (request, &avail) || avail == 0)
+                            break;
+
+                        std::vector<char> buf (static_cast<size_t> (avail));
+                        DWORD got = 0;
+
+                        if (! WinHttpReadData (request, buf.data(), avail, &got) || got == 0)
+                            break;
+
+                        // 先把字节攒起来，最后统一解码：分段 fromUTF8 会切断多字节汉字
+                        bytes.append (buf.data(), static_cast<size_t> (got));
+                    }
+                }
+                else
+                {
+                    err = static_cast<int> (GetLastError());
+                }
+
+                WinHttpCloseHandle (request);
+            }
+            else
+            {
+                err = static_cast<int> (GetLastError());
+            }
+
+            WinHttpCloseHandle (connect);
+        }
+        else
+        {
+            err = static_cast<int> (GetLastError());
+        }
+
+        WinHttpCloseHandle (session);
+
+        if (bytes.empty())
+            return {};
+
+        return juce::String::fromUTF8 (bytes.data(), static_cast<int> (bytes.size()));
+    }
+#endif
+
+    /** WinHTTP 直连优先；失败再回落到 juce::URL（会走系统代理，适合公司代理环境）。 */
+    juce::String httpGet (const juce::String& url, const juce::String& headers,
+                          int& status, int timeoutMs = 7000, int* errorCode = nullptr)
+    {
+        status = 0;
+
+        if (errorCode != nullptr)
+            *errorCode = 0;
+
+       #if JUCE_WINDOWS
+        int winErr = 0;
+        auto viaWinHttp = winHttpGet (url, headers, status, winErr, timeoutMs);
+
+        if (status > 0)
+        {
+            // HTTP 层已经通：即使 4xx/5xx 也把内容交给调用方判断，不重复请求
+            return viaWinHttp;
+        }
+
+        if (errorCode != nullptr)
+            *errorCode = winErr;
+
+        status = 0;
+       #endif
 
         const auto options =
             juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
@@ -339,13 +521,13 @@ namespace
 
         for (const auto* host : hosts)
         {
-            int status = 0;
+            int status = 0, err = 0;
             const auto body = httpGet (juce::String (host) + tail, kKugouHeaders,
-                                       status, 5000);
+                                       status, 5000, &err);
 
             if (! usable (body, status))
             {
-                diag << "song" << status << " ";
+                diag << stepDiag ("song", status, err) << " ";
                 continue;
             }
 
@@ -430,14 +612,14 @@ namespace
 
         for (const auto& kw : keywords)
         {
-            int status = 0;
+            int status = 0, err = 0;
             const auto body = httpGet (
                 "https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword="
-                + urlEncode (kw), kKugouHeaders, status, 6000);
+                + urlEncode (kw), kKugouHeaders, status, 6000, &err);
 
             if (! usable (body, status))
             {
-                diag << "kw" << status << " ";
+                diag << stepDiag ("kw", status, err) << " ";
                 continue;
             }
 
@@ -743,7 +925,7 @@ Outcome search (juce::String title, juce::String artist,
 
     //---- 4. LRCLIB 兜底 ------------------------------------------------------
     {
-        int status = 0;
+        int status = 0, err = 0;
         juce::String body;
 
         // 有歌手时先用精确参数，命中率比模糊 q= 高
@@ -751,15 +933,16 @@ Outcome search (juce::String title, juce::String artist,
         {
             body = httpGet ("https://lrclib.net/api/search?track_name=" + urlEncode (title)
                             + "&artist_name=" + urlEncode (artist),
-                            kLrclibHeaders, status);
+                            kLrclibHeaders, status, 7000, &err);
         }
 
         if (! usable (body, status))
         {
             status = 0;
+            err = 0;
             const auto q = artist.isNotEmpty() ? title + " " + artist : title;
             body = httpGet ("https://lrclib.net/api/search?q=" + urlEncode (q),
-                            kLrclibHeaders, status);
+                            kLrclibHeaders, status, 7000, &err);
         }
 
         if (usable (body, status))
@@ -786,7 +969,7 @@ Outcome search (juce::String title, juce::String artist,
         }
         else
         {
-            diag << "lrc" << status << " ";
+            diag << stepDiag ("lrc", status, err) << " ";
         }
     }
 

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(LyricSync VERSION 1.9.3 LANGUAGES CXX)
+project(LyricSync VERSION 1.9.4 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -72,3 +72,8 @@ target_link_libraries(LyricSync
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+# 在线搜词用 WinHTTP 直连（绕开 WinINet 继承的系统代理设置）
+if (WIN32)
+    target_link_libraries(LyricSync PUBLIC winhttp)
+endif()
