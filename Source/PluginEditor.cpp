@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.0.0";
+    const char* const kVersion = "2.0.1";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -1830,6 +1830,126 @@ void LyricSyncEditor::paintHeader (juce::Graphics& g)
     g.drawLine (22.0f, 64.0f, baseW() - 22.0f, 64.0f, 1.0f);
 }
 
+juce::Rectangle<float> LyricSyncEditor::railIconRect (int index) const
+{
+    const float x = (railWidth() - 30.0f) * 0.5f;
+
+    return { x, 54.0f + static_cast<float> (index) * 36.0f, 30.0f, 30.0f };
+}
+
+int LyricSyncEditor::railIconAt (juce::Point<float> logical) const
+{
+    if (! sidebarCollapsed || orientation != Orientation::horizontal)
+        return -1;
+
+    for (int i = 0; i < 5; ++i)
+        if (railIconRect (i).expanded (2.0f).contains (logical))
+            return i;
+
+    return -1;
+}
+
+/** 收起态那一列：载入 / 编辑 / 着色 / 导出 / 设置，纯 Path，不依赖字体。 */
+void LyricSyncEditor::paintRailIcons (juce::Graphics& g)
+{
+    for (int i = 0; i < 5; ++i)
+    {
+        const auto r = railIconRect (i);
+        const float cx = r.getCentreX();
+        const float cy = r.getCentreY();
+
+        const bool active = (i == 2 && annotateMode);
+
+        g.setColour (active ? palette.accent.withAlpha (0.14f)
+                            : palette.text.withAlpha (0.04f));
+        g.fillRoundedRectangle (r, 6.0f);
+
+        if (active)
+        {
+            g.setColour (palette.accent.withAlpha (0.55f));
+            g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+        }
+
+        g.setColour (active ? palette.accent : palette.dim);
+        g.setFont (uiFont (11.0f));
+
+        if (i == 0 || i == 3)
+        {
+            // 载入 = 箭头向下进托盘；导出 = 箭头向上出托盘
+            const float dir = (i == 0) ? 1.0f : -1.0f;
+            const float sx = cx, sy = cy - 6.0f * dir;
+
+            juce::Path p;
+            p.startNewSubPath (sx, sy);
+            p.lineTo (sx, sy + 7.0f * dir);
+            p.startNewSubPath (sx - 3.2f, sy + 4.2f * dir);
+            p.lineTo (sx, sy + 7.2f * dir);
+            p.lineTo (sx + 3.2f, sy + 4.2f * dir);
+            p.startNewSubPath (cx - 5.5f, cy + 3.4f);
+            p.lineTo (cx - 5.5f, cy + 6.0f);
+            p.lineTo (cx + 5.5f, cy + 6.0f);
+            p.lineTo (cx + 5.5f, cy + 3.4f);
+
+            g.strokePath (p, juce::PathStrokeType (1.3f,
+                            juce::PathStrokeType::curved,
+                            juce::PathStrokeType::rounded));
+        }
+        else if (i == 1)
+        {
+            // 编辑 = 三行文字（歌词文本）
+            juce::Path p;
+
+            for (int k = 0; k < 3; ++k)
+            {
+                const float w = (k == 2) ? 4.0f : 5.5f;
+                p.startNewSubPath (cx - 5.5f, cy - 4.4f + static_cast<float> (k) * 4.4f);
+                p.lineTo (cx + (k == 2 ? -1.5f : w), cy - 4.4f + static_cast<float> (k) * 4.4f);
+            }
+
+            g.strokePath (p, juce::PathStrokeType (1.3f,
+                            juce::PathStrokeType::curved,
+                            juce::PathStrokeType::rounded));
+        }
+        else if (i == 2)
+        {
+            drawBrushIcon (g, r.withSizeKeepingCentre (17.0f, 17.0f),
+                           active ? palette.accent : palette.dim);
+        }
+        else
+        {
+            // 设置 = 齿轮
+            juce::Path p;
+            p.addEllipse (cx - 2.2f, cy - 2.2f, 4.4f, 4.4f);
+            g.strokePath (p, juce::PathStrokeType (1.2f));
+
+            p.clear();
+            p.addEllipse (cx - 5.2f, cy - 5.2f, 10.4f, 10.4f);
+            g.strokePath (p, juce::PathStrokeType (1.2f));
+
+            g.setColour ((i == 4) ? (active ? palette.accent : palette.dim) : palette.dim);
+
+            juce::Path ticks;
+
+            for (int k = 0; k < 8; ++k)
+            {
+                const float ang = juce::MathConstants<float>::twoPi
+                                * static_cast<float> (k) / 8.0f;
+                const float x1 = cx + std::cos (ang) * 5.2f;
+                const float y1 = cy + std::sin (ang) * 5.2f;
+                const float x2 = cx + std::cos (ang) * 6.6f;
+                const float y2 = cy + std::sin (ang) * 6.6f;
+
+                ticks.startNewSubPath (x1, y1);
+                ticks.lineTo (x2, y2);
+            }
+
+            g.strokePath (ticks, juce::PathStrokeType (1.2f,
+                            juce::PathStrokeType::curved,
+                            juce::PathStrokeType::rounded));
+        }
+    }
+}
+
 void LyricSyncEditor::paintSidebar (juce::Graphics& g)
 {
     const float railW = railWidth();
@@ -1862,6 +1982,10 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
         g.setColour (palette.panelEdge.withAlpha (0.35f));
         g.drawLine (12.0f, 40.0f, railW - 12.0f, 40.0f, 1.0f);
     }
+
+    // 收起态：只用图标代替整列按钮
+    if (! wide && orientation == Orientation::horizontal)
+        paintRailIcons (g);
 
     // 折叠键：贴在侧栏右缘的垂直中点
     if (orientation == Orientation::horizontal)
@@ -3658,6 +3782,25 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
         standaloneSeekDragging = true;
         seekStandaloneAt (toLogicalPoint (e.position));
         return;
+    }
+
+    // 收起态图标：直接转发给对应的按钮
+    {
+        const int icon = railIconAt (toLogicalPoint (e.position));
+
+        if (icon >= 0)
+        {
+            switch (icon)
+            {
+                case 0:  loadButton.triggerClick();     break;
+                case 1:  pasteButton.triggerClick();    break;
+                case 2:  annotateButton.triggerClick(); break;
+                case 3:  exportButton.triggerClick();   break;
+                default: gearButton.triggerClick();     break;
+            }
+
+            return;
+        }
     }
 
     // 侧栏中缝的折叠键

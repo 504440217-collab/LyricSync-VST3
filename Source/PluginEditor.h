@@ -150,6 +150,9 @@ private:
     void paintSidebar (juce::Graphics& g);
     float railWidth() const;
     juce::Rectangle<float> railToggleRect() const;
+    juce::Rectangle<float> railIconRect (int index) const;
+    int  railIconAt (juce::Point<float> logical) const;
+    void paintRailIcons (juce::Graphics& g);
     void toggleSidebar();
     void paintStage  (juce::Graphics& g, juce::Rectangle<float> area);
     void paintTapStage (juce::Graphics& g, juce::Rectangle<float> area);
