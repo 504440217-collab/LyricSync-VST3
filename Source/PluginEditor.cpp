@@ -1618,13 +1618,36 @@ void LyricSyncEditor::resized()
         }
         else
         {
-            const float cx = 60.0f, cy = 250.0f, cw = 540.0f;
+            const auto rr = tapEditRowRect();
 
-            tapTextEditor.setBounds (scaledRect (cx + 24, cy + 52, cw - 48, 30));
-            tapTimeEditor.setBounds (scaledRect (cx + 88, cy + 92, 160, 26));
-            tapRowRestampButton.setBounds (scaledRect (cx + 312, cy + 90, 110, 30));
-            tapRowApplyButton  .setBounds (scaledRect (cx + 24, cy + 140, 120, 30));
-            tapRowCancelButton .setBounds (scaledRect (cx + 156, cy + 140, 120, 30));
+            if (! rr.isEmpty())
+            {
+                // 时间码 / 歌词 两个输入框直接盖在那一行上
+                const float rowH = rr.getHeight() - 2.0f;
+
+                tapTimeEditor.setBounds (scaledRect (rr.getX() + 24.0f, rr.getY() + 1.0f,
+                                                     92.0f, rowH));
+                tapTextEditor.setBounds (scaledRect (rr.getX() + 122.0f, rr.getY() + 1.0f,
+                                                     juce::jmax (60.0f, rr.getWidth() - 166.0f),
+                                                     rowH));
+
+                // 三个动作按钮落在列表下方那一条
+                const float by = stage.getBottom() - 32.0f;
+
+                tapRowRestampButton.setBounds (scaledRect (stage.getX(), by, 108.0f, 26.0f));
+                tapRowApplyButton  .setBounds (scaledRect (stage.getX() + 116.0f, by, 108.0f, 26.0f));
+                tapRowCancelButton .setBounds (scaledRect (stage.getX() + 232.0f, by, 108.0f, 26.0f));
+            }
+            else
+            {
+                const float cx = 60.0f, cy = 250.0f, cw = 540.0f;
+
+                tapTextEditor.setBounds (scaledRect (cx + 24, cy + 52, cw - 48, 30));
+                tapTimeEditor.setBounds (scaledRect (cx + 88, cy + 92, 160, 26));
+                tapRowRestampButton.setBounds (scaledRect (cx + 312, cy + 90, 110, 30));
+                tapRowApplyButton  .setBounds (scaledRect (cx + 24, cy + 140, 120, 30));
+                tapRowCancelButton .setBounds (scaledRect (cx + 156, cy + 140, 120, 30));
+            }
         }
     }
 
@@ -2414,8 +2437,10 @@ void LyricSyncEditor::paintAnnotateOverlay (juce::Graphics& g, juce::Rectangle<f
 //==============================================================================
 void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> area)
 {
-    //---- 行编辑：盖住打轴主界面，只留这张小卡片 --------------------------
-    if (tapEditIndex >= 0)
+    //---- 行编辑：横版直接在被点的那一行上编辑；竖版或行已滚出视区才用卡片 -------
+    const auto editRow = tapEditRowRect();
+
+    if (tapEditIndex >= 0 && (orientation == Orientation::vertical || editRow.isEmpty()))
     {
         const bool v = (orientation == Orientation::vertical);
 
@@ -2570,10 +2595,22 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
             const auto r  = rows[(size_t) i];
             const int  li = ids[(size_t) i];
 
-            g.setColour (palette.text.withAlpha (0.05f));
+            const bool thisEditing = (li == tapEditIndex);
+
+            g.setColour (thisEditing ? palette.accent.withAlpha (0.10f)
+                                     : palette.text.withAlpha (0.05f));
             g.fillRoundedRectangle (r, 5.0f);
-            g.setColour (palette.text.withAlpha (0.10f));
+
+            g.setColour (thisEditing ? palette.accent.withAlpha (0.55f)
+                                     : palette.text.withAlpha (0.10f));
             g.drawRoundedRectangle (r, 5.0f, 1.0f);
+
+            if (thisEditing)
+            {
+                g.setColour (palette.accent);
+                g.fillRoundedRectangle (r.getX() - 3.0f, r.getY() + 3.0f,
+                                        2.5f, r.getHeight() - 6.0f, 1.2f);
+            }
 
             auto ri = r.toNearestInt();
             const auto armRect = tapRowArmButton (r);
@@ -5671,6 +5708,23 @@ void LyricSyncEditor::cancelArm()
     repaint();
 }
 
+/** 正在编辑的那一行在屏幕上的位置；被滚出可视区时返回空。 */
+juce::Rectangle<float> LyricSyncEditor::tapEditRowRect() const
+{
+    if (! tapMode || tapEditIndex < 0)
+        return {};
+
+    const auto rows = tapListRows (stageArea());
+    const auto ids  = tapListIndices();
+
+    for (int i = 0; i < static_cast<int> (rows.size())
+                    && i < static_cast<int> (ids.size()); ++i)
+        if (ids[(size_t) i] == tapEditIndex)
+            return rows[(size_t) i];
+
+    return {};
+}
+
 juce::Rectangle<float> LyricSyncEditor::tapRowArmButton (juce::Rectangle<float> row) const
 {
     return row.removeFromRight (row.getHeight()).reduced (2.0f);
@@ -6304,12 +6358,7 @@ void LyricSyncEditor::toggleZenMode()
 //==============================================================================
 void LyricSyncEditor::mouseDoubleClick (const juce::MouseEvent& e)
 {
-    if (settingsOpen || aboutOpen || searchOpen || editing || tapMode
-        || annotateMode || styleEditIndex >= 0)
-        return;
-
-    // 读数条上双击不该进全屏（那里是进度条和按钮）
-    if (hudBounds().expanded (0.0f, 10.0f).contains (toLogicalPoint (e.position)))
+    if (settingsOpen || aboutOpen || editing || tapMode)
         return;
 
     if (stageArea().transformedBy (uiTransform).contains (e.position))

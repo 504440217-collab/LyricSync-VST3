@@ -249,7 +249,8 @@ private:
     juce::Rectangle<float> tapListThumb (juce::Rectangle<float> area) const;  // 可拖动的滑块
     int  tapListTotal() const;            // 已打点总行数
     int  tapListMaxScroll() const;        // 最多能往回翻几行
-    juce::Rectangle<float> tapRowArmButton (juce::Rectangle<float> row) const; // 列表行右侧「重打」热区
+    juce::Rectangle<float> tapRowArmButton (juce::Rectangle<float> row) const;
+    juce::Rectangle<float> tapEditRowRect() const;   // 正在编辑那一行的可视矩形 // 列表行右侧「重打」热区
     void scrollTapList (int deltaRows);
     void syncTapToPlayhead (double t);   // 宿主跳转时间后，把打轴指针挪到对应那一句
     void showEditorMenu (juce::TextEditor& te, juce::Point<int> screenPos);   // 右键菜单（跟随中英文）
