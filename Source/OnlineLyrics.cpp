@@ -13,6 +13,11 @@
  #endif
  #include <windows.h>
  #include <winhttp.h>
+
+ // Win10 1903+ 才有的选项；老 SDK 头文件里可能没定义（数值 140）
+ #ifndef WINHTTP_OPTION_IPV6_FAST_FALLBACK
+  #define WINHTTP_OPTION_IPV6_FAST_FALLBACK 140
+ #endif
 #endif
 
 namespace OnlineLyrics
@@ -126,7 +131,7 @@ namespace
             return {};
         }
 
-        HINTERNET session = WinHttpOpen (L"LyricSync/1.9.5 (VST3 lyrics plugin)",
+        HINTERNET session = WinHttpOpen (L"LyricSync/1.9.6 (VST3 lyrics plugin)",
                                          useProxy ? WINHTTP_ACCESS_TYPE_DEFAULT_PROXY
                                                   : WINHTTP_ACCESS_TYPE_NO_PROXY,
                                          WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
@@ -137,7 +142,18 @@ namespace
             return {};
         }
 
-        WinHttpSetTimeouts (session, timeoutMs, timeoutMs, timeoutMs, timeoutMs);
+        // 解析 3s、连接 5s、发送 5s、接收 8s
+        WinHttpSetTimeouts (session, 3000, timeoutMs, 5000, 8000);
+
+        {
+            // 双栈网络的救命选项：这些歌词域名都优先返回 AAAA 记录，
+            // 而这条线路的 IPv6 出口不通。没有它，WinHTTP 会按顺序死等每个
+            // IPv6 地址直到超时（浏览器有 Happy Eyeballs 所以不受影响）。
+            // 打开后：先试 IPv6（300ms），不通立刻转 IPv4。
+            BOOL fastFallback = TRUE;
+            WinHttpSetOption (session, WINHTTP_OPTION_IPV6_FAST_FALLBACK,
+                              &fastFallback, sizeof (fastFallback));
+        }
 
         {
             DWORD protocols = 0x00000800 | 0x00002000;      // TLS 1.2 + TLS 1.3
