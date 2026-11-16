@@ -388,6 +388,28 @@ TABLE = [
     ("standalonePause", "暂停", "Pause"),
     ("tipStandalone",   "独立版专用：暂停 / 继续播放歌词；点右边的进度条可拖到任意位置",
                         "Standalone only: pause / resume; click or drag the progress bar to seek"),
+
+    #--- 侧栏（内联搜索 / 步进器 / 分段开关） ---------------------------------
+    ("loadShort",       "载入", "Load"),
+    ("editShort",       "编辑", "Edit"),
+    ("searchPlaceholder", "搜索歌名或歌手", "Search title or artist"),
+    ("orientSwitchTip", "横版 / 竖版切换", "Switch horizontal / vertical"),
+    ("lyricsGroup",     "歌词", "Lyrics"),
+    ("offsetLabel",     "偏移", "Offset"),
+    ("annotateShort",   "着色", "Style"),
+    ("exportShort",     "导出", "Export"),
+    ("searchRefreshTip",  "换一个歌词源：从 LX Music 取当前播放歌词",
+                          "Switch source: take the playing track from LX Music"),
+    ("startPrefix",     "起点 ", "Start "),
+    ("offsetHint",      "±100 ms", "±100 ms"),
+    ("fontHint",        "Ctrl + 滚轮可微调", "Ctrl + scroll to fine-tune"),
+    ("segLine",         "逐行", "By line"),
+    ("segWord",         "逐字", "By word"),
+    ("cast",            "投屏", "Cast"),
+    ("castSoon",        "投屏（局域网二维码）正在做，下个版本给你",
+                        "Casting (LAN QR code) is on the way in the next build"),
+    ("fontPx",          " px", " px"),
+    ("searchResultsEmpty", "输入歌名后回车搜索", "Type a title, then press Enter"),
 ]
 
 DEMO_ZH = """[ti:LyricSync 演示歌词]

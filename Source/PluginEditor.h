@@ -42,11 +42,11 @@ public:
 };
 
 //==============================================================================
-/** 无文字的图标按钮（齿轮 / 关闭），用 Path 画，不依赖字体里有没有该字形。 */
+/** 无文字的图标按钮（齿轮 / 关闭 / 横竖切换），用 Path 画，不依赖字体里有没有该字形。 */
 class IconButton : public juce::Button
 {
 public:
-    enum class Icon { gear, close, none };
+    enum class Icon { gear, close, none, orient };
 
     explicit IconButton (Icon iconToDraw) : juce::Button (juce::String()), icon (iconToDraw) {}
 
@@ -54,6 +54,10 @@ public:
 
     juce::Colour normalColour { juce::Colours::white };
     juce::Colour hoverColour  { juce::Colours::white };
+
+    /** true = 自己带 1px 细边框（和侧栏其它按钮同款），false = 纯图标。 */
+    bool boxed = false;
+    juce::Colour boxFill { juce::Colours::transparentBlack };   // 遮挡用底色（侧栏色）
 
 private:
     Icon icon;
@@ -154,6 +158,25 @@ private:
     int  railIconAt (juce::Point<float> logical) const;
     void paintRailIcons (juce::Graphics& g);
     void toggleSidebar();
+    void paintSidebarSearch (juce::Graphics& g);
+    void paintStepperBox (juce::Graphics& g, juce::Rectangle<float> box,
+                          const juce::String& value, bool active = false);
+
+    //---- 侧栏 / 底部面板几何（内联搜索 + 步进器 + 分段开关） -----------------
+    juce::Rectangle<float> sideTopRow() const;
+    juce::Rectangle<float> sideSearchBox() const;
+    juce::Rectangle<float> sideSearchRefresh() const;
+    juce::Rectangle<float> sideResultsArea() const;
+    std::vector<juce::Rectangle<float>> sideResultRows() const;
+    juce::Rectangle<float> sideStartRow() const;
+    juce::Rectangle<float> sideOffsetStepper() const;
+    juce::Rectangle<float> sideFontStepper() const;
+    juce::Rectangle<float> sideSegArea() const;
+    juce::Rectangle<float> sideToolsRow() const;
+    int  sideResultAt (juce::Point<float> logical) const;
+    void fontStep (int px);
+    void setAdvanceMode (int mode);
+
     void paintStage  (juce::Graphics& g, juce::Rectangle<float> area);
     void paintTapStage (juce::Graphics& g, juce::Rectangle<float> area);
     void paintSettings (juce::Graphics& g, juce::Rectangle<float> panel);
@@ -369,6 +392,8 @@ private:
     double hudHoldUntilMs = 0.0;      // 预览定位保持到什么时候
     bool   offsetScrub    = false;    // 正在拖「偏移」数值
     double offsetScrubMs  = 0.0;
+    bool   fontScrub      = false;    // 正在拖「字号」数值
+    double fontScrubPx    = 140.0;
     juce::Rectangle<float> standaloneSeekBar;  // 逻辑坐标，自绘进度条热区
 
     // 在线搜歌词的后台线程池。用池而不是 std::thread::detach()：
@@ -437,13 +462,17 @@ private:
     bool prefsLoaded = false;           // 全局偏好存在时，外观以它为准
 
     //---- Widgets ------------------------------------------------------------
-    IconButton gearButton  { IconButton::Icon::gear };
+    IconButton orientButton { IconButton::Icon::orient };
     IconButton logoButton  { IconButton::Icon::none };
     IconButton closeSettingsButton { IconButton::Icon::close };
     IconButton closeAboutButton    { IconButton::Icon::close };
 
+    juce::TextButton  gearButton;
     juce::TextButton  loadButton;
     juce::TextButton  pasteButton;
+    juce::TextButton  castButton;             // 投屏（局域网）
+    juce::TextButton  fontMinusButton, fontPlusButton;
+    juce::TextButton  segLineButton, segWordButton;
     juce::TextButton  demoButton;
     juce::TextButton  minusButton;
     juce::TextButton  plusButton       { "+" };

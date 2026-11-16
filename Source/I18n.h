@@ -282,7 +282,25 @@ namespace Lang
         netHint,
         standalonePlay,
         standalonePause,
-        tipStandalone
+        tipStandalone,
+        loadShort,
+        editShort,
+        searchPlaceholder,
+        orientSwitchTip,
+        lyricsGroup,
+        offsetLabel,
+        annotateShort,
+        exportShort,
+        searchRefreshTip,
+        startPrefix,
+        offsetHint,
+        fontHint,
+        segLine,
+        segWord,
+        cast,
+        castSoon,
+        fontPx,
+        searchResultsEmpty
     };
 
     /** Decode a UTF-8 byte literal into a real juce::String. */

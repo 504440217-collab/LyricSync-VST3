@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.0.3";
+    const char* const kVersion = "2.0.4";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -365,7 +365,7 @@ namespace
 //==============================================================================
 juce::Font ScaledLookAndFeel::getTextButtonFont (juce::TextButton&, int)
 {
-    return juce::Font (typeface, 12.5f * scale, juce::Font::plain);
+    return juce::Font (typeface, 12.0f * scale, juce::Font::plain);
 }
 
 juce::Font ScaledLookAndFeel::getComboBoxFont (juce::ComboBox&)
@@ -399,6 +399,41 @@ void ScaledLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b
 
     // 用按钮自己的文字色做"边缘色"：深色主题→淡白边，浅色主题→淡黑边
     const auto edge = b.findColour (juce::TextButton::textColourOffId);
+
+    //---- 方案里的扁平按钮：透明底 + 1px 细边，只有悬停/选中才上色 ----------
+    const bool flat = static_cast<bool> (b.getProperties().getWithDefault ("flat", false));
+    const bool bare = static_cast<bool> (b.getProperties().getWithDefault ("bare", false));
+
+    if (flat || bare)
+    {
+        const bool on = b.getToggleState();
+        const auto fillOn = b.findColour (juce::TextButton::buttonOnColourId);
+        const bool darkBg = backgroundColour.getPerceivedBrightness() < 0.45f;
+
+        if (on)
+        {
+            g.setColour (fillOn);
+            g.fillRoundedRectangle (r, juce::jmax (4.0f, 8.0f * scale));
+        }
+        else if (over || down)
+        {
+            g.setColour (darkBg ? juce::Colours::white.withAlpha (0.06f)
+                                : juce::Colours::black.withAlpha (0.04f));
+            g.fillRoundedRectangle (r, juce::jmax (4.0f, 8.0f * scale));
+        }
+
+        if (! bare)
+        {
+            const auto line = on ? edge.withAlpha (0.55f)
+                                 : edge.withAlpha (over ? (darkBg ? 0.50f : 0.26f)
+                                                        : (darkBg ? 0.32f : 0.15f));
+            g.setColour (line);
+            g.drawRoundedRectangle (r.reduced (0.4f), juce::jmax (4.0f, 8.0f * scale),
+                                    juce::jmax (1.0f, 1.1f * scale));
+        }
+
+        return;
+    }
 
     auto fill = backgroundColour;
 
@@ -464,13 +499,51 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
     if (icon == Icon::none)
         return;
 
-    const auto b = getLocalBounds().toFloat().reduced (1.0f);
+    const auto outer = getLocalBounds().toFloat().reduced (0.5f);
+    const auto b = outer.reduced (1.0f);
     const auto colour = (over || down) ? hoverColour : normalColour;
 
-    if (over || down)
+    if (boxed)
+    {
+        const bool darkBg = boxFill.getPerceivedBrightness() < 0.45f;
+
+        if (over || down)
+        {
+            g.setColour (darkBg ? juce::Colours::white.withAlpha (0.06f)
+                                : juce::Colours::black.withAlpha (0.04f));
+            g.fillRoundedRectangle (outer, 8.0f);
+        }
+
+        g.setColour (normalColour.withAlpha (over ? (darkBg ? 0.50f : 0.26f)
+                                                  : (darkBg ? 0.32f : 0.15f)));
+        g.drawRoundedRectangle (outer.reduced (0.4f), 8.0f, 1.1f);
+    }
+    else if (over || down)
     {
         g.setColour (normalColour.withAlpha (0.10f));
         g.fillRoundedRectangle (b, 8.0f);
+    }
+
+    if (icon == Icon::orient)
+    {
+        // 横 / 竖：两片叠起来的圆角矩形（前片用侧栏底色挡住后片）
+        const float s = juce::jmin (outer.getWidth(), outer.getHeight());
+        const auto box = outer.withSizeKeepingCentre (s, s).reduced (s * 0.20f);
+
+        const auto back  = juce::Rectangle<float> (box.getX(), box.getY() + box.getHeight() * 0.52f,
+                                                   box.getWidth() * 0.58f, box.getHeight() * 0.40f);
+        const auto front = juce::Rectangle<float> (box.getX() + box.getWidth() * 0.45f,
+                                                   box.getY(), box.getWidth() * 0.55f,
+                                                   box.getHeight() * 0.66f);
+
+        g.setColour (colour);
+        g.drawRoundedRectangle (back.reduced (0.5f), 1.6f, 1.15f);
+        g.fillRoundedRectangle (front, 1.6f);
+        g.setColour (boxFill.isTransparent() ? juce::Colours::black.withAlpha (0.55f) : boxFill);
+        g.fillRoundedRectangle (front.reduced (1.6f), 1.0f);
+        g.setColour (colour);
+        g.drawRoundedRectangle (front.reduced (0.5f), 1.6f, 1.15f);
+        return;
     }
 
     const float cx = b.getCentreX();
@@ -559,18 +632,33 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
                      &setStartButton, &undoSetStartButton, &annotateButton,
                      &styleApplyButton, &styleClearButton, &styleCancelButton,
                      &onlineLyricsButton, &searchGoButton, &searchLoadButton,
-                     &searchLxButton, &simplifyToggle, &standalonePlayButton })
+                     &searchLxButton, &simplifyToggle, &standalonePlayButton,
+                     &gearButton, &castButton, &fontMinusButton, &fontPlusButton,
+                     &segLineButton, &segWordButton })
     {
         b->addListener (this);
         addAndMakeVisible (*b);
     }
 
-    for (auto* b : { &gearButton, &logoButton, &closeSettingsButton, &closeAboutButton,
+    for (auto* b : { &orientButton, &logoButton, &closeSettingsButton, &closeAboutButton,
                      &closeSearchButton })
     {
         b->addListener (this);
         addAndMakeVisible (*b);
     }
+
+    // 逐行 / 逐字：互斥分段开关
+    for (auto* b : { &segLineButton, &segWordButton })
+    {
+        b->setClickingTogglesState (true);
+        b->setRadioGroupId (0x5301);
+        b->setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xfff3f3f5));
+        b->setColour (juce::TextButton::textColourOnId,   juce::Colour (0xff101013));
+        b->getProperties().set ("bare", true);
+    }
+
+    segLineButton.setToggleState (advanceMode == 0, juce::dontSendNotification);
+    segWordButton.setToggleState (advanceMode == 1, juce::dontSendNotification);
 
     demoClockToggle.setClickingTogglesState (true);
     hintToggle.setClickingTogglesState (true);
@@ -597,12 +685,12 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
         addAndMakeVisible (l);
     };
 
-    addLabel (offsetLabel, 12.0f, true,  juce::Justification::centred);
+    addLabel (offsetLabel, 11.5f, false, juce::Justification::centred);
     addLabel (fileLabel,   11.5f, false, juce::Justification::centredLeft);
     addLabel (hintLabel,   11.0f, false, juce::Justification::centredLeft);
     hintLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     hintLabel.addMouseListener (this, false);      // 点提示词 -> 换下一条
-    addLabel (fontLabel,   11.0f, false, juce::Justification::centredLeft);
+    addLabel (fontLabel,   11.5f, false, juce::Justification::centred);
     addLabel (audioLabel,  11.5f, false, juce::Justification::centredRight);
 
     for (auto* ed : { &tapTextEditor, &tapTimeEditor })
@@ -877,11 +965,19 @@ void LyricSyncEditor::syncControlsFromSettings()
 /** Re-apply every localised widget text / tooltip. */
 void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
 {
-    loadButton  .setButtonText (tr (Lang::TextId::loadLyrics));
-    pasteButton .setButtonText (tr (Lang::TextId::pasteEdit));
+    loadButton  .setButtonText (tr (Lang::TextId::loadShort));
+    pasteButton .setButtonText (tr (Lang::TextId::editShort));
     demoButton  .setButtonText (tr (Lang::TextId::demoLyrics));
 
-    minusButton     .setButtonText (tr (Lang::TextId::minusSymbol));
+    gearButton      .setButtonText (tr (Lang::TextId::settingsTitle));
+    castButton      .setButtonText (tr (Lang::TextId::cast));
+    fontMinusButton .setButtonText ("A-");
+    fontPlusButton  .setButtonText ("A+");
+    segLineButton   .setButtonText (tr (Lang::TextId::segLine));
+    segWordButton   .setButtonText (tr (Lang::TextId::segWord));
+
+    minusButton     .setButtonText (juce::String::fromUTF8 ("\xe2\x80\xb9"));    // ‹
+    plusButton      .setButtonText (juce::String::fromUTF8 ("\xe2\x80\xba"));    // ›
     resetButton     .setButtonText (tr (Lang::TextId::reset));
     demoPlayButton  .setButtonText (tr (Lang::TextId::playSymbol));
     demoStopButton  .setButtonText (tr (Lang::TextId::stopSymbol));
@@ -904,7 +1000,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     tapRowApplyButton .setButtonText (tr (Lang::TextId::tapRowApply));
     tapRowCancelButton.setButtonText (tr (Lang::TextId::cancel));
     measureButton   .setButtonText (tr (Lang::TextId::measureAudio));
-    exportButton    .setButtonText (tr (Lang::TextId::exportLrc));
+    exportButton    .setButtonText (tr (Lang::TextId::exportShort));
     retempoButton   .setButtonText (tr (Lang::TextId::retempo));
 
     orientHButton   .setButtonText (tr (Lang::TextId::orientH));
@@ -912,11 +1008,10 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     pickImageButton .setButtonText (tr (Lang::TextId::pickImage));
     clearImageButton.setButtonText (tr (Lang::TextId::clearImage));
 
-    fontLabel.setText (tr (Lang::TextId::fontSize), juce::dontSendNotification);
     setStartButton   .setButtonText (tr (Lang::TextId::setStart));
-    undoSetStartButton.setButtonText (tr (Lang::TextId::undoSetStart));
+    undoSetStartButton.setButtonText (juce::String::fromUTF8 ("\xe2\x86\xba"));   // ↺
     annotateButton   .setButtonText (tr (annotateMode ? Lang::TextId::tapFinish
-                                                      : Lang::TextId::annotate));
+                                                      : Lang::TextId::annotateShort));
     onlineLyricsButton.setButtonText (tr (Lang::TextId::onlineLyrics));
     standalonePlayButton.setButtonText (tr (processor.standalonePlaying.load()
                                                 ? Lang::TextId::standalonePause
@@ -986,7 +1081,10 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     //---- Hover explanations -------------------------------------------------
     loadButton      .setTooltip (tr (Lang::TextId::tipLoad));
     pasteButton     .setTooltip (tr (Lang::TextId::tipPaste));
-    demoButton      .setTooltip (tr (Lang::TextId::tipDemo));
+    orientButton    .setTooltip (tr (Lang::TextId::orientSwitchTip));
+    castButton      .setTooltip (tr (Lang::TextId::cast));
+    fontMinusButton .setTooltip (tr (Lang::TextId::tipFont));
+    fontPlusButton  .setTooltip (tr (Lang::TextId::tipFont));    demoButton      .setTooltip (tr (Lang::TextId::tipDemo));
     minusButton     .setTooltip (tr (Lang::TextId::tipMinus));
     plusButton      .setTooltip (tr (Lang::TextId::tipPlus));
     resetButton     .setTooltip (tr (Lang::TextId::tipReset));
@@ -1038,6 +1136,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     simplifyToggle    .setTooltip (tr (Lang::TextId::onlineSimplifyHint));
     networkBox        .setTooltip (tr (Lang::TextId::netHint));
     searchLxButton    .setTooltip (tr (Lang::TextId::lxButtonHint));
+    searchTitleEditor .setTooltip (tr (Lang::TextId::searchRefreshTip));
     hintLabel       .setTooltip (tr (Lang::TextId::hintClick));
 
     if (reloadDemoLyrics && usingDemoLyrics)
@@ -1046,6 +1145,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
         fileDescription = tr (Lang::TextId::demoFileDesc);
     }
 
+    updateLabels (displayTime);
     repaint();
 }
 
@@ -1092,13 +1192,13 @@ void LyricSyncEditor::refreshLookAndFeel()
     offsetLabel.setColour (juce::Label::backgroundColourId, palette.card);
     offsetLabel.addMouseListener (this, false);
     offsetLabel.setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+    fontLabel.addMouseListener (this, false);
+    fontLabel.setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
     hintLabel.setColour (juce::Label::textColourId, palette.faint);
     fileLabel.setColour (juce::Label::textColourId, palette.dim);
-    fontLabel.setColour (juce::Label::textColourId, palette.faint);
+    fontLabel.setColour (juce::Label::textColourId, palette.dim);
     audioLabel.setColour (juce::Label::textColourId, palette.dim);
 
-    gearButton.normalColour = palette.dim;
-    gearButton.hoverColour  = palette.accent;
     closeSettingsButton.normalColour = palette.dim;
     closeSettingsButton.hoverColour  = palette.text;
     closeAboutButton.normalColour = palette.dim;
@@ -1140,18 +1240,34 @@ void LyricSyncEditor::updateVisibility()
 
     for (auto* c : { static_cast<juce::Component*> (&loadButton),
                      static_cast<juce::Component*> (&pasteButton),
+                     static_cast<juce::Component*> (&orientButton),
                      static_cast<juce::Component*> (&minusButton),
                      static_cast<juce::Component*> (&plusButton),
                      static_cast<juce::Component*> (&resetButton),
                      static_cast<juce::Component*> (&offsetLabel),
                      static_cast<juce::Component*> (&fontLabel),
+                     static_cast<juce::Component*> (&fontMinusButton),
+                     static_cast<juce::Component*> (&fontPlusButton),
                      static_cast<juce::Component*> (&fontSlider),
+                     static_cast<juce::Component*> (&segLineButton),
+                     static_cast<juce::Component*> (&segWordButton),
                      static_cast<juce::Component*> (&measureButton),
                      static_cast<juce::Component*> (&exportButton),
                      static_cast<juce::Component*> (&retempoButton),
                      static_cast<juce::Component*> (&gearButton),
-                     static_cast<juce::Component*> (&onlineLyricsButton) })
+                     static_cast<juce::Component*> (&castButton),
+                     static_cast<juce::Component*> (&onlineLyricsButton),
+                     static_cast<juce::Component*> (&searchTitleEditor) })
         c->setVisible (normal && railOpen);
+
+    // 内联搜索框在窄轨（收起态）里放不下，横版收起时隐藏
+    searchTitleEditor.setVisible (normal && railOpen
+                                  && (orientation == Orientation::vertical || railWidth() > 60.0f));
+
+    // 已废掉的控件：字号滑块换成步进器，在线搜词按钮换成内联搜索框
+    fontSlider.setVisible (false);
+    resetButton.setVisible (false);
+    onlineLyricsButton.setVisible (false);
 
     // 右下角读数条接管了这些内容：重测音频废弃；测速 / 撤销 / 音频长度都挪进读数条
     measureButton.setVisible (false);
@@ -1222,14 +1338,13 @@ void LyricSyncEditor::updateVisibility()
     closeAboutButton.setVisible (aboutOpen);
     logoButton.setVisible (false);      // 左下角「关于」入口已移除，功能说明改为悬停提示
 
-    // 在线搜词面板
-    for (auto* c : { static_cast<juce::Component*> (&searchTitleEditor),
-                     static_cast<juce::Component*> (&searchArtistEditor),
+    // 旧版弹窗里的搜索控件：内联化之后全部不再显示
+    for (auto* c : { static_cast<juce::Component*> (&searchArtistEditor),
                      static_cast<juce::Component*> (&searchGoButton),
                      static_cast<juce::Component*> (&searchLoadButton),
                      static_cast<juce::Component*> (&searchLxButton),
                      static_cast<juce::Component*> (&closeSearchButton) })
-        c->setVisible (searchOpen);
+        c->setVisible (false);
 
     customUrlEditor.setVisible (settingsOpen);
     lxUrlEditor.setVisible (settingsOpen);
@@ -1265,6 +1380,116 @@ juce::Rectangle<float> LyricSyncEditor::railToggleRect() const
     return { w - 9.0f, baseH() * 0.5f - 26.0f, 18.0f, 52.0f };
 }
 
+//==============================================================================
+//  侧栏 / 底部面板几何：横版是一列 248 宽的侧栏，竖版把这些控件排到底部两条带里。
+//==============================================================================
+juce::Rectangle<float> LyricSyncEditor::sideTopRow() const
+{
+    if (orientation == Orientation::vertical)
+        return { vShift() + 22.0f, 566.0f, 556.0f, 28.0f };
+
+    return { 12.0f, 54.0f, 224.0f, 27.0f };
+}
+
+juce::Rectangle<float> LyricSyncEditor::sideSearchBox() const
+{
+    if (orientation == Orientation::vertical)
+        return { vShift() + 22.0f, 600.0f, 556.0f, 32.0f };
+
+    return { 12.0f, 89.0f, 224.0f, 32.0f };
+}
+
+/** 搜索框右侧的「换一个歌词源」小圆钮。 */
+juce::Rectangle<float> LyricSyncEditor::sideSearchRefresh() const
+{
+    const auto box = sideSearchBox();
+
+    return { box.getRight() - 30.0f, box.getY() + 4.0f, 26.0f, box.getHeight() - 8.0f };
+}
+
+juce::Rectangle<float> LyricSyncEditor::sideStartRow() const{
+    if (orientation == Orientation::vertical)
+        return { vShift() + 22.0f, 730.0f, 556.0f, 26.0f };
+
+    return { 12.0f, 388.0f, 224.0f, 27.0f };
+}
+
+juce::Rectangle<float> LyricSyncEditor::sideOffsetStepper() const
+{
+    if (orientation == Orientation::vertical)
+        return { vShift() + 86.0f, 762.0f, 492.0f, 26.0f };
+
+    return { 12.0f, 430.0f, 224.0f, 27.0f };
+}
+
+juce::Rectangle<float> LyricSyncEditor::sideFontStepper() const
+{
+    if (orientation == Orientation::vertical)
+        return { vShift() + 86.0f, 794.0f, 492.0f, 26.0f };
+
+    return { 12.0f, 486.0f, 224.0f, 27.0f };
+}
+
+juce::Rectangle<float> LyricSyncEditor::sideSegArea() const
+{
+    if (orientation == Orientation::vertical)
+        return { vShift() + 22.0f, 826.0f, 556.0f, 26.0f };
+
+    return { 12.0f, 524.0f, 224.0f, 28.0f };
+}
+
+juce::Rectangle<float> LyricSyncEditor::sideToolsRow() const
+{
+    if (orientation == Orientation::vertical)
+        return { vShift() + 22.0f, 860.0f, 556.0f, 26.0f };
+
+    return { 12.0f, 560.0f, 224.0f, 27.0f };
+}
+
+juce::Rectangle<float> LyricSyncEditor::sideResultsArea() const
+{
+    const auto searchBox = sideSearchBox();
+    const auto top = searchBox.getBottom() + 8.0f;
+    const auto bottom = sideStartRow().getY() - 8.0f;
+
+    if (orientation == Orientation::vertical)
+        return { searchBox.getX(), top, searchBox.getWidth(),
+                 juce::jmax (0.0f, bottom - top) };
+
+    return { 12.0f, top, 224.0f, juce::jmax (0.0f, bottom - top) };
+}
+
+std::vector<juce::Rectangle<float>> LyricSyncEditor::sideResultRows() const
+{
+    std::vector<juce::Rectangle<float>> rows;
+
+    const auto area = sideResultsArea();
+    const float rowH = orientation == Orientation::vertical ? 38.0f : 46.0f;
+    const float gap  = 4.0f;
+
+    const int total = static_cast<int> (searchResults.size());
+    const int fit   = juce::jmax (1, static_cast<int> ((area.getHeight() + gap) / (rowH + gap)));
+    const int maxScroll = juce::jmax (0, total - fit);
+    const int first = juce::jlimit (0, maxScroll, searchScroll);
+
+    for (int i = 0; i < fit && first + i < total; ++i)
+        rows.push_back ({ area.getX(), area.getY() + static_cast<float> (i) * (rowH + gap),
+                          area.getWidth(), rowH });
+
+    return rows;
+}
+
+int LyricSyncEditor::sideResultAt (juce::Point<float> logical) const
+{
+    const auto rows = sideResultRows();
+
+    for (int i = 0; i < static_cast<int> (rows.size()); ++i)
+        if (rows[(size_t) i].contains (logical))
+            return searchScroll + i;
+
+    return -1;
+}
+
 juce::Rectangle<float> LyricSyncEditor::stageArea() const
 {
     if (zenMode)
@@ -1273,7 +1498,7 @@ juce::Rectangle<float> LyricSyncEditor::stageArea() const
     const float rail = railWidth();
 
     if (orientation == Orientation::vertical)
-        return { rail + 10.0f, 72.0f, baseW() - rail - 20.0f, 556.0f };
+        return { rail + 10.0f, 72.0f, baseW() - rail - 20.0f, 486.0f };
 
     return { rail + 14.0f, 56.0f, hBaseW - rail - 28.0f, hBaseH - 56.0f - 84.0f };
 }
@@ -1326,42 +1551,81 @@ std::vector<juce::Rectangle<float>> LyricSyncEditor::searchResultRows (
     return rows;
 }
 
-/** 侧栏控件统一成方案里的扁平样式：底色=侧栏色、细灰边、灰字，选中态才用强调色。 */
+/** 侧栏控件统一成方案里的扁平样式：透明底 + 1px 细灰边、灰字，选中态才用强调色。 */
 void LyricSyncEditor::styleSidebarControls()
 {
     const bool light = palette.text.getPerceivedBrightness() < 0.5f;
 
-    const auto bg   = light ? juce::Colour (0xfff2f4f8) : juce::Colour (0xff131316);
+    const auto bg   = light ? juce::Colour (0xfff2f4f8) : juce::Colour (0xff0e0e11);
     const auto fg   = light ? juce::Colour (0xff4a5160) : juce::Colour (0xffa1a1aa);
     const auto onBg = light ? juce::Colour (0xffd9f2ea) : juce::Colour (0xff1b3330);
     const auto onFg = light ? juce::Colour (0xff0e9e86) : juce::Colour (0xff5ce1c1);
 
-    // gearButton 是 IconButton（自绘齿轮），单独设置
-    gearButton.normalColour = fg;
-    gearButton.hoverColour  = light ? juce::Colour (0xff2b3242) : juce::Colour (0xfff2f2f4);
-
     for (auto* b : { &loadButton, &pasteButton, &onlineLyricsButton,
                      &setStartButton, &undoSetStartButton,
-                     &minusButton, &plusButton, &resetButton,
-                     &annotateButton, &exportButton })
+                     &annotateButton, &exportButton, &gearButton, &castButton,
+                     &resetButton })
     {
         b->setColour (juce::TextButton::buttonColourId, bg);
         b->setColour (juce::TextButton::buttonOnColourId, onBg);
         b->setColour (juce::TextButton::textColourOffId, fg);
         b->setColour (juce::TextButton::textColourOnId, onFg);
+        b->getProperties().set ("flat", true);
     }
 
-    offsetLabel.setColour (juce::Label::backgroundColourId, bg);
+    // 步进器内部的 ‹ › / A- A+：没有自己的边框（外框由 paintStepperBox 画）
+    for (auto* b : { &minusButton, &plusButton, &fontMinusButton, &fontPlusButton })
+    {
+        b->setColour (juce::TextButton::buttonColourId, bg);
+        b->setColour (juce::TextButton::buttonOnColourId, onBg);
+        b->setColour (juce::TextButton::textColourOffId,
+                      light ? juce::Colour (0xff8b94a6) : juce::Colour (0xff7a7a85));
+        b->setColour (juce::TextButton::textColourOnId, onFg);
+        b->getProperties().set ("bare", true);
+    }
+
+    // 横竖切换：图标按钮也做成一格按钮，前片用侧栏底色遮挡
+    orientButton.normalColour = fg;
+    orientButton.hoverColour  = light ? juce::Colour (0xff2b3242) : juce::Colour (0xfff2f2f4);
+    orientButton.boxed = true;
+    orientButton.boxFill = bg;
+
+    // 分段开关：底槽自己画，两个按钮裸色块
+    for (auto* b : { &segLineButton, &segWordButton })
+    {
+        b->setColour (juce::TextButton::buttonColourId, bg);
+        b->setColour (juce::TextButton::buttonOnColourId,
+                      light ? juce::Colour (0xffffffff) : juce::Colour (0xfff3f3f5));
+        b->setColour (juce::TextButton::textColourOffId,
+                      light ? juce::Colour (0xff5d6883) : juce::Colour (0xff63636d));
+        b->setColour (juce::TextButton::textColourOnId, juce::Colour (0xff101013));
+        b->getProperties().set ("bare", true);
+    }
+
+    // 内联搜索框：框体在 paintSidebarSearch 里画，编辑器本身全透明
+    searchTitleEditor.setColour (juce::TextEditor::backgroundColourId, juce::Colours::transparentBlack);
+    searchTitleEditor.setColour (juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
+    searchTitleEditor.setColour (juce::TextEditor::focusedOutlineColourId, juce::Colours::transparentBlack);
+    searchTitleEditor.setColour (juce::TextEditor::textColourId, light ? juce::Colour (0xff1a2233)
+                                                                       : juce::Colour (0xfff2f2f4));
+    searchTitleEditor.setColour (juce::TextEditor::highlightColourId,
+                                 palette.accent.withAlpha (0.22f));
+    searchTitleEditor.setColour (juce::CaretComponent::caretColourId, palette.accent);
+    searchTitleEditor.setTextToShowWhenEmpty (tr (Lang::TextId::searchPlaceholder),
+                                              light ? juce::Colour (0xff98a2b8)
+                                                    : juce::Colour (0xff63636d));
+
+    offsetLabel.setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     offsetLabel.setColour (juce::Label::textColourId, light ? juce::Colour (0xff2b3242)
-                                                            : juce::Colour (0xffe7e9ee));
+                                                            : juce::Colour (0xfff2f2f4));
 }
 
 void LyricSyncEditor::updateScaledFonts()
 {
-    offsetLabel.setFont (uiFont (12.0f  * uiScale, true));
+    offsetLabel.setFont (uiFont (11.5f * uiScale));
     fileLabel  .setFont (uiFont (11.5f * uiScale));
     hintLabel  .setFont (uiFont (11.0f  * uiScale));
-    fontLabel  .setFont (uiFont (11.0f  * uiScale));
+    fontLabel  .setFont (uiFont (11.5f * uiScale));
     audioLabel .setFont (uiFont (11.5f * uiScale));
     editorBox  .setFont (uiFont (14.0f  * uiScale));
     editorBox.applyFontToAllText (uiFont (14.0f * uiScale));
@@ -1439,49 +1703,88 @@ void LyricSyncEditor::resized()
 
     if (orientation == Orientation::horizontal)
     {
-        const float rail  = railWidth();
-        const float pad   = 12.0f;
-        const float cw    = juce::jmax (16.0f, rail - pad * 2.0f);
-        const float halfW = juce::jmax (8.0f, (cw - 6.0f) * 0.5f);
         const float bottom = baseH();
 
         editorBox.setBounds (scaledRect (stage.getX() + 2.0f, stage.getY() + 2.0f,
                                          stage.getWidth() - 4.0f, stage.getHeight() - 4.0f));
 
-        //---- 来源：载入 / 编辑 / 在线搜词 ----
-        loadButton .setBounds (scaledRect (pad, 58.0f, halfW, 28.0f));
-        pasteButton.setBounds (scaledRect (pad + halfW + 6.0f, 58.0f, halfW, 28.0f));
-        onlineLyricsButton.setBounds (scaledRect (pad, 92.0f, cw, 28.0f));
-
-        //---- 时间：起点 / 撤销 ----
-        setStartButton   .setBounds (scaledRect (pad, 142.0f, halfW, 28.0f));
-        undoSetStartButton.setBounds (scaledRect (pad + halfW + 6.0f, 142.0f, halfW, 28.0f));
-
-        //---- 偏移：− 数值 + 归零 ----
+        //---- 顶部：载入 / 编辑 / 横竖切换（三格等宽）----
         {
-            const float btnW   = 26.0f;
-            const float resetW = 44.0f;
-            const float labelW = juce::jmax (36.0f, cw - btnW * 2.0f - resetW - 16.0f);
+            const auto row = sideTopRow();
+            const float thirdW = juce::jmax (8.0f, (row.getWidth() - 8.0f) / 3.0f);
 
-            minusButton .setBounds (scaledRect (pad, 176.0f, btnW, 28.0f));
-            offsetLabel .setBounds (scaledRect (pad + btnW, 176.0f, labelW + 10.0f, 28.0f));
-            plusButton  .setBounds (scaledRect (pad + btnW + labelW + 10.0f, 176.0f,
-                                               btnW, 28.0f));
-            resetButton .setBounds (scaledRect (pad + cw - resetW, 176.0f, resetW, 28.0f));
+            loadButton .setBounds (scaledRect (row.getX(), row.getY(), thirdW, row.getHeight()));
+            pasteButton.setBounds (scaledRect (row.getX() + thirdW + 4.0f, row.getY(),
+                                               thirdW, row.getHeight()));
+            orientButton.setBounds (scaledRect (row.getX() + (thirdW + 4.0f) * 2.0f, row.getY(),
+                                                thirdW, row.getHeight()));
         }
 
-        //---- 字号 ----
-        fontLabel .setBounds (scaledRect (pad, 226.0f, 70.0f, 12.0f));
-        fontSlider.setBounds (scaledRect (pad, 240.0f, cw, 20.0f));
-
-        //---- 底部：设置 / 着色 / 导出 ----
+        //---- 内联搜索框 ----
         {
-            const float thirdW = juce::jmax (8.0f, (cw - 8.0f) / 3.0f);
-            const float by = bottom - 44.0f;
+            const auto box = sideSearchBox();
+            const auto refresh = sideSearchRefresh();
 
-            gearButton    .setBounds (scaledRect (pad, by, thirdW, 28.0f));
-            annotateButton.setBounds (scaledRect (pad + thirdW + 4.0f, by, thirdW, 28.0f));
-            exportButton  .setBounds (scaledRect (pad + (thirdW + 4.0f) * 2.0f, by, thirdW, 28.0f));
+            searchTitleEditor.setBounds (scaledRect (box.getX() + 30.0f, box.getY() + 5.0f,
+                                                     refresh.getX() - box.getX() - 36.0f,
+                                                     box.getHeight() - 10.0f));
+        }
+
+        //---- 起点：文字 + 设起点 + 撤销 ----
+        {
+            const auto row = sideStartRow();
+            const float undoW = 26.0f;
+            const float setW  = 52.0f;
+
+            setStartButton.setBounds (scaledRect (row.getRight() - setW - 4.0f - undoW, row.getY(),
+                                                  setW, row.getHeight()));
+            undoSetStartButton.setBounds (scaledRect (row.getRight() - undoW, row.getY(),
+                                                      undoW, row.getHeight()));
+        }
+
+        //---- 偏移 / 字号步进器 ----
+        {
+            const auto off = sideOffsetStepper();
+            const float btnW = 27.0f;
+            const float midW = juce::jmax (20.0f, off.getWidth() - btnW * 2.0f);
+
+            minusButton.setBounds (scaledRect (off.getX(), off.getY(), btnW, off.getHeight()));
+            offsetLabel.setBounds (scaledRect (off.getX() + btnW, off.getY(), midW, off.getHeight()));
+            plusButton .setBounds (scaledRect (off.getRight() - btnW, off.getY(),
+                                               btnW, off.getHeight()));
+
+            const auto fnt = sideFontStepper();
+
+            fontMinusButton.setBounds (scaledRect (fnt.getX(), fnt.getY(), 30.0f, fnt.getHeight()));
+            fontLabel      .setBounds (scaledRect (fnt.getX() + 30.0f, fnt.getY(),
+                                                   juce::jmax (20.0f, fnt.getWidth() - 60.0f),
+                                                   fnt.getHeight()));
+            fontPlusButton .setBounds (scaledRect (fnt.getRight() - 30.0f, fnt.getY(),
+                                                   30.0f, fnt.getHeight()));
+        }
+
+        //---- 逐行 / 逐字 ----
+        {
+            const auto seg = sideSegArea();
+            const float halfW = (seg.getWidth() - 4.0f) * 0.5f;
+
+            segLineButton.setBounds (scaledRect (seg.getX() + 2.0f, seg.getY() + 2.0f,
+                                                 halfW - 2.0f, seg.getHeight() - 4.0f));
+            segWordButton.setBounds (scaledRect (seg.getX() + halfW + 2.0f, seg.getY() + 2.0f,
+                                                 halfW - 2.0f, seg.getHeight() - 4.0f));
+        }
+
+        //---- 底部：设置 / 着色 / 导出 / 投屏 ----
+        {
+            const auto row = sideToolsRow();
+            const float w4 = juce::jmax (8.0f, (row.getWidth() - 12.0f) / 4.0f);
+
+            gearButton    .setBounds (scaledRect (row.getX(), row.getY(), w4, row.getHeight()));
+            annotateButton.setBounds (scaledRect (row.getX() + w4 + 4.0f, row.getY(), w4, row.getHeight()));
+            exportButton  .setBounds (scaledRect (row.getX() + (w4 + 4.0f) * 2.0f, row.getY(),
+                                                  w4, row.getHeight()));
+            castButton    .setBounds (scaledRect (row.getX() + (w4 + 4.0f) * 3.0f, row.getY(),
+                                                  w4, row.getHeight()));
         }
 
         //---- 编辑 / 打轴模式的按钮：放到舞台下方那条空白带 ----
@@ -1527,49 +1830,95 @@ void LyricSyncEditor::resized()
 
         if (editing)
         {
-            applyTextButton .setBounds (scaledRect (ox + 22, 646, 176, 30));
-            cancelTextButton.setBounds (scaledRect (ox + 206, 646, 176, 30));
-            tapStartButton  .setBounds (scaledRect (ox + 390, 646, 176, 30));
+            applyTextButton .setBounds (scaledRect (ox + 22, 566, 176, 30));
+            cancelTextButton.setBounds (scaledRect (ox + 206, 566, 176, 30));
+            tapStartButton  .setBounds (scaledRect (ox + 390, 566, 176, 30));
         }
         else if (tapMode)
         {
-            tapUndoButton      .setBounds (scaledRect (ox + 22, 646, 168, 30));
-            tapRestartButton   .setBounds (scaledRect (ox + 198, 646, 168, 30));
-            tapFinishButton    .setBounds (scaledRect (ox + 374, 646, 168, 30));
+            tapUndoButton      .setBounds (scaledRect (ox + 22, 566, 168, 30));
+            tapRestartButton   .setBounds (scaledRect (ox + 198, 566, 168, 30));
+            tapFinishButton    .setBounds (scaledRect (ox + 374, 566, 168, 30));
 
-            tapNudgeBackButton .setBounds (scaledRect (ox + 22, 682, 96, 30));
-            tapNudgeFwdButton  .setBounds (scaledRect (ox + 126, 682, 96, 30));
-            tapPauseButton     .setBounds (scaledRect (ox + 230, 682, 104, 30));
-            tapHostTransportButton.setBounds (scaledRect (ox + 342, 682, 124, 30));
-            tapExitButton      .setBounds (scaledRect (ox + 474, 682, 84, 30));
+            tapNudgeBackButton .setBounds (scaledRect (ox + 22, 602, 96, 30));
+            tapNudgeFwdButton  .setBounds (scaledRect (ox + 126, 602, 96, 30));
+            tapPauseButton     .setBounds (scaledRect (ox + 230, 602, 104, 30));
+            tapHostTransportButton.setBounds (scaledRect (ox + 342, 602, 124, 30));
+            tapExitButton      .setBounds (scaledRect (ox + 474, 602, 84, 30));
         }
         else
         {
-            loadButton .setBounds (scaledRect (ox + 22, 644, 176, 30));
-            pasteButton.setBounds (scaledRect (ox + 206, 644, 176, 30));
-            annotateButton.setBounds (scaledRect (ox + 390, 644, 176, 30));
+            // 顶部：载入 / 编辑 / 横竖
+            const auto row = sideTopRow();
+            const float thirdW = juce::jmax (8.0f, (row.getWidth() - 8.0f) / 3.0f);
 
-            minusButton .setBounds (scaledRect (ox + 22, 682, 56, 30));
-            offsetLabel .setBounds (scaledRect (ox + 86, 682, 120, 30));
-            plusButton  .setBounds (scaledRect (ox + 214, 682, 56, 30));
-            resetButton .setBounds (scaledRect (ox + 278, 682, 96, 30));
-            fontLabel   .setBounds (scaledRect (ox + 382, 686, 40, 22));
-            fontSlider  .setBounds (scaledRect (ox + 426, 686, 140, 22));
+            loadButton .setBounds (scaledRect (row.getX(), row.getY(), thirdW, row.getHeight()));
+            pasteButton.setBounds (scaledRect (row.getX() + thirdW + 4.0f, row.getY(),
+                                               thirdW, row.getHeight()));
+            orientButton.setBounds (scaledRect (row.getX() + (thirdW + 4.0f) * 2.0f, row.getY(),
+                                                thirdW, row.getHeight()));
 
-            measureButton.setBounds (scaledRect (ox + 22, 720, 176, 30));
-            standalonePlayButton.setBounds (scaledRect (ox + 206, 720, 88, 30));
-            standaloneSeekBar = { ox + 300.0f, 720.0f, 266.0f, 30.0f };
+            const auto box = sideSearchBox();
+            const auto refresh = sideSearchRefresh();
+
+            searchTitleEditor.setBounds (scaledRect (box.getX() + 30.0f, box.getY() + 5.0f,
+                                                     refresh.getX() - box.getX() - 36.0f,
+                                                     box.getHeight() - 10.0f));
+
+            const auto start = sideStartRow();
+            const float undoW = 26.0f;
+            const float setW  = 52.0f;
+
+            setStartButton.setBounds (scaledRect (start.getRight() - setW - 4.0f - undoW,
+                                                  start.getY(), setW, start.getHeight()));
+            undoSetStartButton.setBounds (scaledRect (start.getRight() - undoW, start.getY(),
+                                                      undoW, start.getHeight()));
+
+            const auto off = sideOffsetStepper();
+            const float btnW = 27.0f;
+
+            minusButton.setBounds (scaledRect (off.getX(), off.getY(), btnW, off.getHeight()));
+            offsetLabel.setBounds (scaledRect (off.getX() + btnW, off.getY(),
+                                               juce::jmax (20.0f, off.getWidth() - btnW * 2.0f),
+                                               off.getHeight()));
+            plusButton .setBounds (scaledRect (off.getRight() - btnW, off.getY(),
+                                               btnW, off.getHeight()));
+
+            const auto fnt = sideFontStepper();
+
+            fontMinusButton.setBounds (scaledRect (fnt.getX(), fnt.getY(), 40.0f, fnt.getHeight()));
+            fontLabel      .setBounds (scaledRect (fnt.getX() + 40.0f, fnt.getY(),
+                                                   juce::jmax (20.0f, fnt.getWidth() - 90.0f),
+                                                   fnt.getHeight()));
+            fontPlusButton .setBounds (scaledRect (fnt.getRight() - 50.0f, fnt.getY(),
+                                                   50.0f, fnt.getHeight()));
+
+            const auto seg = sideSegArea();
+            const float segHalf = (seg.getWidth() - 4.0f) * 0.5f;
+
+            segLineButton.setBounds (scaledRect (seg.getX() + 2.0f, seg.getY() + 2.0f,
+                                                 segHalf - 2.0f, seg.getHeight() - 4.0f));
+            segWordButton.setBounds (scaledRect (seg.getX() + segHalf + 2.0f, seg.getY() + 2.0f,
+                                                 segHalf - 2.0f, seg.getHeight() - 4.0f));
+
+            const auto tools = sideToolsRow();
+            const float w4 = juce::jmax (8.0f, (tools.getWidth() - 12.0f) / 4.0f);
+
+            gearButton    .setBounds (scaledRect (tools.getX(), tools.getY(), w4, tools.getHeight()));
+            annotateButton.setBounds (scaledRect (tools.getX() + w4 + 4.0f, tools.getY(),
+                                                  w4, tools.getHeight()));
+            exportButton  .setBounds (scaledRect (tools.getX() + (w4 + 4.0f) * 2.0f, tools.getY(),
+                                                  w4, tools.getHeight()));
+            castButton    .setBounds (scaledRect (tools.getX() + (w4 + 4.0f) * 3.0f, tools.getY(),
+                                                  w4, tools.getHeight()));
+
+            standalonePlayButton.setBounds (scaledRect (ox + 22, 566, 88, 30));
+            standaloneSeekBar = { ox + 120.0f, 566.0f, 458.0f, 30.0f };
         }
 
-        setStartButton   .setBounds (scaledRect (ox + 22, 756, 176, 28));
-        undoSetStartButton.setBounds (scaledRect (ox + 206, 756, 176, 28));
-        onlineLyricsButton.setBounds (scaledRect (ox + 390, 756, 176, 28));
-
-        fileLabel .setBounds (scaledRect (22, 794, baseW() - 44.0f, 22));
-        hintLabel .setBounds (scaledRect (22, 818, baseW() - 44.0f, 20));
-        audioLabel.setBounds (scaledRect (ox + 22, 846, 240, 22));
-        exportButton.setBounds (scaledRect (ox + 270, 846, 200, 26));
-        retempoButton.setBounds (scaledRect (ox + 478, 846, 100, 26));
+        fileLabel .setBounds (scaledRect (22, 40, baseW() - 44.0f, 18));
+        hintLabel .setBounds (scaledRect (22, 56, baseW() - 44.0f, 16));
+        audioLabel.setBounds (scaledRect (ox + 22, 40, 240, 18));
 
     }
 
@@ -1621,22 +1970,7 @@ void LyricSyncEditor::resized()
                                           ctrlW * 0.5f - 6.0f, 28));
     }
 
-    //---- 在线搜词面板 -------------------------------------------------------
-    {
-        const auto panel = searchPanelArea();
-        const float x = panel.getX() + 24.0f;
-        const float w = panel.getWidth() - 48.0f;
-        const float ex = x + 66.0f;
-        const float ew = w - 66.0f;
-
-        closeSearchButton.setBounds (scaledRect (panel.getRight() - 46.0f,
-                                                 panel.getY() + 12.0f, 34.0f, 34.0f));
-        searchTitleEditor .setBounds (scaledRect (ex, panel.getY() + 76.0f, ew, 28.0f));
-        searchArtistEditor.setBounds (scaledRect (ex, panel.getY() + 116.0f, ew, 28.0f));
-        searchGoButton    .setBounds (scaledRect (x, panel.getY() + 156.0f, 110.0f, 28.0f));
-        searchLoadButton  .setBounds (scaledRect (x, panel.getY() + 442.0f, 150.0f, 30.0f));
-        searchLxButton    .setBounds (scaledRect (x + 162.0f, panel.getY() + 442.0f, 180.0f, 30.0f));
-    }
+    //---- 在线搜词面板已改为侧栏内联，这里不再布局（控件全部隐藏） ----------
 
     //---- Tap row editor -----------------------------------------------------
     if (tapEditIndex >= 0)
@@ -1733,38 +2067,24 @@ void LyricSyncEditor::paint (juce::Graphics& g)
     }
     else
     {
-        juce::ColourGradient gradient (palette.bgTop, 0.0f, 0.0f,
-                                       palette.bgBottom, 0.0f, bounds.getHeight(), false);
-        g.setGradientFill (gradient);
-        g.fillAll();
-
-    }
-
-    // 两层柔光：右上青绿、左下靛蓝。自定义图片皮肤也叠，否则照片会把氛围全挡住。
-    {
-        const float w = bounds.getWidth();
-        const float h = bounds.getHeight();
-
-        const auto glow = [&g] (float cx, float cy, float radius, juce::Colour c)
+        // 深色皮肤：整块近黑，不做任何柔光 / 圈圈，保持极简
+        if (palette.text.getPerceivedBrightness() > 0.5f)
         {
-            for (int i = 0; i < 5; ++i)
-            {
-                const float rr = radius * (1.0f - 0.18f * static_cast<float> (i));
-                g.setColour (c.withAlpha (0.040f));
-                g.fillEllipse (cx - rr, cy - rr, rr * 2.0f, rr * 2.0f);
-            }
-        };
-
-        glow (w * 0.84f, h * 0.02f, w * 0.40f, palette.accent);
-        glow (w * 0.06f, h * 1.02f, w * 0.34f, juce::Colour (0xff5b7bff));
+            g.setColour (juce::Colour (0xff08080a));
+            g.fillAll();
+        }
+        else
+        {
+            juce::ColourGradient gradient (palette.bgTop, 0.0f, 0.0f,
+                                           palette.bgBottom, 0.0f, bounds.getHeight(), false);
+            g.setGradientFill (gradient);
+            g.fillAll();
+        }
     }
 
     // 逻辑画布
     const juce::Graphics::ScopedSaveState state (g);
     g.addTransform (uiTransform);
-
-    g.setColour (palette.accent.withAlpha (0.045f));
-    g.fillEllipse (baseW() - 230.0f, -190.0f, 460.0f, 460.0f);
 
     if (! zenMode)
         paintSidebar (g);
@@ -2008,74 +2328,340 @@ void LyricSyncEditor::paintRailIcons (juce::Graphics& g)
     }
 }
 
+//==============================================================================
+//  方案 v4 · 侧栏：近黑底、1px 细边、内联搜索、步进器、四格工具条
+//==============================================================================
+void LyricSyncEditor::paintStepperBox (juce::Graphics& g, juce::Rectangle<float> box,
+                                       const juce::String&, bool active)
+{
+    const bool light = palette.text.getPerceivedBrightness() < 0.5f;
+    const auto line = light ? juce::Colour (0xffd4dbea) : juce::Colour (0xff33333a);
+
+    g.setColour (active ? palette.accent : line);
+    g.drawRoundedRectangle (box.reduced (0.5f), 8.0f, active ? 1.4f : 1.0f);
+}
+
+void LyricSyncEditor::paintSidebarSearch (juce::Graphics& g)
+{
+    const bool light = palette.text.getPerceivedBrightness() < 0.5f;
+
+    const auto txt2 = light ? juce::Colour (0xff5d6883) : juce::Colour (0xffa1a1aa);
+    const auto txt3 = light ? juce::Colour (0xff98a2b8) : juce::Colour (0xff63636d);
+    const auto line = light ? juce::Colour (0xffd4dbea) : juce::Colour (0xff33333a);
+
+    const bool focused = searchTitleEditor.hasKeyboardFocus (true);
+    const auto box = sideSearchBox();
+
+    // 框体
+    g.setColour (light ? juce::Colour (0xffffffff) : juce::Colour (0xff0d0d0f));
+    g.fillRoundedRectangle (box, 8.0f);
+
+    g.setColour (focused ? palette.accent : line);
+    g.drawRoundedRectangle (box.reduced (0.5f), 8.0f, focused ? 1.4f : 1.0f);
+
+    // 放大镜
+    {
+        const float cx = box.getX() + 16.0f;
+        const float cy = box.getCentreY();
+
+        juce::Path p;
+        p.addEllipse (cx - 4.6f, cy - 4.6f, 6.6f, 6.6f);
+        p.startNewSubPath (cx + 1.4f, cy + 1.4f);
+        p.lineTo (cx + 4.4f, cy + 4.4f);
+
+        g.setColour (txt3);
+        g.strokePath (p, juce::PathStrokeType (1.3f,
+                        juce::PathStrokeType::curved,
+                        juce::PathStrokeType::rounded));
+    }
+
+    // 右侧「换一个歌词源」：圆弧 + 箭头
+    {
+        const auto r = sideSearchRefresh();
+        const float cx = r.getCentreX();
+        const float cy = r.getCentreY();
+
+        juce::Path arc;
+        arc.addCentredArc (cx, cy, 4.2f, 4.2f, 0.0f,
+                           juce::MathConstants<float>::pi * -0.35f,
+                           juce::MathConstants<float>::pi * 1.15f, true);
+
+        g.setColour (searchBusy ? palette.accent.withAlpha (0.6f) : txt3);
+        g.strokePath (arc, juce::PathStrokeType (1.3f,
+                        juce::PathStrokeType::curved,
+                        juce::PathStrokeType::rounded));
+
+        juce::Path head;
+        head.addTriangle (cx + 1.4f, cy - 6.4f, cx + 5.4f, cy - 4.4f, cx + 1.6f, cy - 2.6f);
+        g.fillPath (head);
+    }
+
+    //---- 结果列表 ----------------------------------------------------------
+    const auto area = sideResultsArea();
+
+    if (area.getHeight() < 20.0f)
+        return;
+
+    if (searchResults.empty())
+    {
+        juce::String hint = searchStatus.isNotEmpty() ? searchStatus
+                                                      : tr (Lang::TextId::searchResultsEmpty);
+
+        g.setColour (searchBusy ? txt2 : txt3);
+        g.setFont (uiFont (10.8f));
+        g.drawFittedText (hint, area.reduced (4.0f, 2.0f).toNearestInt(),
+                          juce::Justification::topLeft, 8, 1.0f);
+        return;
+    }
+
+    const auto rows = sideResultRows();
+    const auto titleCol = light ? juce::Colour (0xff1a2233) : juce::Colour (0xfff2f2f4);
+    const auto metaCol  = light ? juce::Colour (0xff98a2b8) : juce::Colour (0xff63636d);
+    const auto selBg    = light ? juce::Colour (0xffeef2f9) : juce::Colour (0xff1c1c20);
+
+    for (int i = 0; i < static_cast<int> (rows.size()); ++i)
+    {
+        const int idx = searchScroll + i;
+
+        if (idx < 0 || idx >= static_cast<int> (searchResults.size()))
+            break;
+
+        const auto& res = searchResults[(size_t) idx];
+        const auto row = rows[(size_t) i];
+        const bool sel = (idx == searchSel);
+
+        if (sel)
+        {
+            g.setColour (selBg);
+            g.fillRoundedRectangle (row, 10.0f);
+            g.setColour (line.brighter (0.25f));
+            g.drawRoundedRectangle (row.reduced (0.5f), 10.0f, 1.0f);
+        }
+
+        // 逐字角标
+        float badgeW = 0.0f;
+
+        if (res.wordSync)
+        {
+            const float bw = 34.0f;
+            const juce::Rectangle<float> badge (row.getRight() - bw - 9.0f,
+                                                row.getCentreY() - 9.0f, bw, 18.0f);
+
+            g.setColour (palette.accent.withAlpha (0.10f));
+            g.fillRoundedRectangle (badge, 9.0f);
+            g.setColour (palette.accent.withAlpha (0.55f));
+            g.drawRoundedRectangle (badge.reduced (0.5f), 9.0f, 1.0f);
+
+            g.setColour (palette.accent);
+            g.setFont (uiFont (9.5f));
+            g.drawText (tr (Lang::TextId::onlineWordSync), badge,
+                        juce::Justification::centred, false);
+
+            badgeW = bw + 12.0f;
+        }
+
+        const float textW = juce::jmax (20.0f, row.getWidth() - 18.0f - badgeW);
+
+        g.setColour (titleCol);
+        g.setFont (uiFont (12.5f, true));
+        g.drawText (res.title.isNotEmpty() ? res.title : juce::String ("-"),
+                    juce::Rectangle<float> (row.getX() + 9.0f,
+                                            row.getCentreY() - 17.0f, textW, 17.0f),
+                    juce::Justification::centredLeft, true);
+
+        // 歌手 · 时长 · 行数
+        juce::String meta = res.artist.isNotEmpty() ? res.artist : res.source;
+
+        if (res.durationSec > 0)
+            meta += juce::String::fromUTF8 ("  \xc2\xb7  ") + juce::String (res.durationSec / 60) + ":"
+                  + juce::String (res.durationSec % 60).paddedLeft ('0', 2);
+
+        if (res.lineCount > 0)
+            meta += juce::String::fromUTF8 ("  \xc2\xb7  ") + juce::String (res.lineCount) + tr (Lang::TextId::lineCountSuffix);
+
+        g.setColour (sel ? metaCol.brighter (0.25f) : metaCol);
+        g.setFont (uiFont (10.5f));
+        g.drawText (meta,
+                    juce::Rectangle<float> (row.getX() + 9.0f,
+                                            row.getCentreY() + 1.0f, textW, 15.0f),
+                    juce::Justification::centredLeft, true);
+    }
+
+    // 搜索中：列表顶部一条流光细线
+    if (searchBusy)
+    {
+        g.setColour (palette.accent.withAlpha (0.65f));
+        g.fillRoundedRectangle (area.getX(), area.getY() - 3.0f, area.getWidth(), 1.5f, 0.75f);
+    }
+}
+
 void LyricSyncEditor::paintSidebar (juce::Graphics& g)
 {
     const float railW = railWidth();
     const bool wide = railW > 60.0f;
+    const bool vertical = (orientation == Orientation::vertical);
 
-    // 背景：深色皮肤用近黑 #131316，浅色皮肤用雾白，保证和方案一致
     const bool lightTheme = palette.text.getPerceivedBrightness() < 0.5f;
-    const auto sideBg = lightTheme ? juce::Colour (0xfff2f4f8)
-                                   : juce::Colour (0xff131316);
+    const auto sideBg   = lightTheme ? juce::Colour (0xfff2f4f8) : juce::Colour (0xff0e0e11);
+    const auto lineCol  = lightTheme ? juce::Colour (0xffd4dbea) : juce::Colour (0xff232327);
+    const auto txt2     = lightTheme ? juce::Colour (0xff5d6883) : juce::Colour (0xffa1a1aa);
+    const auto txt3     = lightTheme ? juce::Colour (0xff98a2b8) : juce::Colour (0xff63636d);
+    const auto titleCol = lightTheme ? juce::Colour (0xff98a2b8) : juce::Colour (0xff55555e);
+
+    // 编辑 / 打轴 / 弹层时侧栏只留品牌行，避免和舞台上的控件打架
+    const bool fullSide = ! editing && ! tapMode && ! settingsOpen && ! aboutOpen;
+
+    // 竖版没有侧栏，把这些控件画在底部面板上
+    if (vertical)
+    {
+        const auto ox = vShift();
+        const auto top = sideTopRow();
+
+        g.setColour (sideBg);
+        g.fillRect (juce::Rectangle<float> (ox + 8.0f, top.getY() - 14.0f,
+                                            baseW() - ox * 2.0f - 16.0f,
+                                            baseH() - top.getY() + 6.0f));
+        g.setColour (lineCol);
+        g.drawLine (ox + 22.0f, top.getY() - 8.0f, ox + 22.0f + 556.0f, top.getY() - 8.0f, 1.0f);
+
+        if (! fullSide)
+            return;
+
+        // 起点 / 偏移 / 字号 三个小标题
+        g.setColour (txt2);
+        g.setFont (uiFont (11.0f));
+        g.drawText (tr (Lang::TextId::fontSize),
+                    juce::Rectangle<float> (ox + 22.0f, sideFontStepper().getY(), 60.0f, 26.0f),
+                    juce::Justification::centredLeft, false);
+        g.drawText (tr (Lang::TextId::offsetLabel),
+                    juce::Rectangle<float> (ox + 22.0f, sideOffsetStepper().getY(), 60.0f, 26.0f),
+                    juce::Justification::centredLeft, false);
+
+        paintStepperBox (g, sideOffsetStepper(), {}, offsetScrub);
+        paintStepperBox (g, sideFontStepper(), {}, fontScrub);
+
+        // 逐行 / 逐字 底槽
+        {
+            const auto seg = sideSegArea();
+            g.setColour (lightTheme ? juce::Colour (0xffe8edf6) : juce::Colour (0xff1c1c20));
+            g.fillRoundedRectangle (seg, 8.0f);
+        }
+
+        {
+            const auto tools = sideToolsRow();
+            g.setColour (lineCol.withAlpha (0.6f));
+            g.drawLine (tools.getX(), tools.getY() - 6.0f, tools.getRight(), tools.getY() - 6.0f, 1.0f);
+        }
+
+        paintSidebarSearch (g);
+
+        // 起点读数
+        {
+            const auto row = sideStartRow();
+            g.setColour (txt2);
+            g.setFont (uiFont (11.5f));
+            g.drawText (tr (Lang::TextId::startPrefix) + timecodeText (-offsetMs / 1000.0),
+                        row.withTrimmedRight (110.0f),
+                        juce::Justification::centredLeft, false);
+        }
+
+        return;
+    }
 
     g.setColour (sideBg);
     g.fillRect (juce::Rectangle<float> (0.0f, 0.0f, railW, baseH()));
 
-    g.setColour (palette.panelEdge.withAlpha (0.45f));
+    g.setColour (lineCol);
     g.drawLine (railW - 0.5f, 0.0f, railW - 0.5f, baseH(), 1.0f);
 
-    if (wide)
+    if (wide && fullSide)
     {
         // 品牌行
         g.setColour (palette.accent);
-        g.fillEllipse (14.0f, 21.0f, 7.0f, 7.0f);
+        g.fillEllipse (14.0f, 15.0f, 7.0f, 7.0f);
 
-        drawText (g, juce::Rectangle<float> (27.0f, 13.0f, 130.0f, 20.0f),
-                  "LyricSync", 12.5f, palette.text, true, -1, {}, 1.0f,
+        drawText (g, juce::Rectangle<float> (27.0f, 11.0f, 130.0f, 18.0f),
+                  "LyricSync", 13.0f, palette.text, false, -1, {}, 1.0f,
                   juce::Justification::centredLeft);
 
-        g.setColour (palette.faint.withAlpha (0.85f));
-        g.setFont (uiFont (9.5f));
+        g.setColour (txt3);
+        g.setFont (uiFont (10.5f));
         g.drawText (juce::String ("v") + kVersion,
-                    juce::Rectangle<float> (150.0f, 17.0f, 84.0f, 14.0f),
+                    juce::Rectangle<float> (140.0f, 12.0f, 94.0f, 16.0f),
                     juce::Justification::centredRight, false);
 
-        // 分隔线
-        g.setColour (palette.panelEdge.withAlpha (0.35f));
-        g.drawLine (12.0f, 40.0f, railW - 12.0f, 40.0f, 1.0f);
+        // 分组标题：歌词 / 来源
+        g.setColour (titleCol);
+        g.setFont (uiFont (10.0f));
+        g.drawText (tr (Lang::TextId::lyricsGroup),
+                    juce::Rectangle<float> (16.0f, 38.0f, 120.0f, 12.0f),
+                    juce::Justification::centredLeft, false);
+        g.drawText (tr (Lang::TextId::sidSource),
+                    juce::Rectangle<float> (railW - 136.0f, 38.0f, 120.0f, 12.0f),
+                    juce::Justification::centredRight, false);
 
-        // 三个分组标题
-        const auto titleCol = lightTheme ? juce::Colour (0xff9aa3b2)
-                                         : juce::Colour (0xff5f5f68);
+        paintSidebarSearch (g);
 
-        const auto groupTitle = [&] (const juce::String& text, float y)
+        // 起点：读数 + 两个小按钮（按钮由子控件画）
         {
-            g.setColour (titleCol);
-            g.setFont (uiFont (9.5f));
-            g.drawText (text, juce::Rectangle<float> (13.0f, y, railW - 26.0f, 12.0f),
-                        juce::Justification::centredLeft, false);
-        };
+            const auto row = sideStartRow();
 
-        groupTitle (tr (Lang::TextId::sidSource),  44.0f);
-        groupTitle (tr (Lang::TextId::sidTime),   128.0f);
-        groupTitle (tr (Lang::TextId::sidDisplay), 212.0f);
+            g.setColour (txt2);
+            g.setFont (uiFont (11.5f));
+            g.drawText (tr (Lang::TextId::startPrefix) + timecodeText (-offsetMs / 1000.0),
+                        row.withTrimmedRight (92.0f),
+                        juce::Justification::centredLeft, false);
+        }
+
+        // 偏移 / 字号：小标题 + 右侧说明
+        {
+            const auto off = sideOffsetStepper();
+            const auto fnt = sideFontStepper();
+
+            g.setColour (titleCol);
+            g.setFont (uiFont (10.0f));
+            g.drawText (tr (Lang::TextId::offsetLabel),
+                        juce::Rectangle<float> (16.0f, off.getY() - 14.0f, 80.0f, 12.0f),
+                        juce::Justification::centredLeft, false);
+            g.drawText (tr (Lang::TextId::offsetHint),
+                        juce::Rectangle<float> (railW - 116.0f, off.getY() - 14.0f, 100.0f, 12.0f),
+                        juce::Justification::centredRight, false);
+
+            g.setColour (titleCol);
+            g.setFont (uiFont (10.0f));
+            g.drawText (tr (Lang::TextId::fontSize),
+                        juce::Rectangle<float> (16.0f, fnt.getY() - 14.0f, 80.0f, 12.0f),
+                        juce::Justification::centredLeft, false);
+            g.drawText (tr (Lang::TextId::fontHint),
+                        juce::Rectangle<float> (railW - 156.0f, fnt.getY() - 14.0f, 140.0f, 12.0f),
+                        juce::Justification::centredRight, false);
+
+            paintStepperBox (g, off, {}, offsetScrub);
+            paintStepperBox (g, fnt, {}, fontScrub);
+        }
+
+        // 逐行 / 逐字 底槽
+        {
+            const auto seg = sideSegArea();
+            g.setColour (lightTheme ? juce::Colour (0xffe8edf6) : juce::Colour (0xff1c1c20));
+            g.fillRoundedRectangle (seg, 8.0f);
+        }
     }
 
     // 收起态：只用图标代替整列按钮
-    if (! wide && orientation == Orientation::horizontal)
+    if (! wide)
         paintRailIcons (g);
 
     // 折叠键：贴在侧栏右缘的垂直中点
-    if (orientation == Orientation::horizontal)
     {
         const auto t = railToggleRect();
         const float cx = t.getCentreX();
         const float cy = t.getCentreY();
 
-        g.setColour (palette.bgBottom.brighter (0.07f));
+        g.setColour (lineCol.withAlpha (0.5f));
         g.fillRoundedRectangle (t.reduced (1.0f, 8.0f), 6.0f);
 
-        g.setColour (palette.faint);
+        g.setColour (txt3);
 
         juce::Path chev;
         const float dir = sidebarCollapsed ? 1.0f : -1.0f;   // 收起时朝右
@@ -2092,31 +2678,29 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
 
 void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area)
 {
-    // 用「文字色 + 低透明度」做玻璃：深色主题是薄薄一层白，浅色主题是薄薄一层黑
-    g.setColour (palette.text.withAlpha (0.055f));
-    g.fillRoundedRectangle (area, 22.0f);
+    const bool darkSkin = palette.text.getPerceivedBrightness() > 0.5f;
 
-    // 上亮下暗的渐变，做出玻璃的厚度感
+    if (darkSkin)
     {
+        // 深色：舞台就是一块比画布更黑的平面，没有卡片、没有描边、没有光晕
+        g.setColour (juce::Colour (0xff030304));
+        g.fillRect (area);
+    }
+    else
+    {
+        // 浅色皮肤保留一点玻璃质感，否则白底上什么都看不见
+        g.setColour (palette.text.withAlpha (0.055f));
+        g.fillRoundedRectangle (area, 22.0f);
+
         juce::ColourGradient thick (juce::Colours::transparentBlack,
                                     area.getX(), area.getCentreY(),
-                                    juce::Colours::black.withAlpha (0.16f),
+                                    juce::Colours::black.withAlpha (0.10f),
                                     area.getX(), area.getBottom(), false);
         g.setGradientFill (thick);
         g.fillRoundedRectangle (area, 22.0f);
-    }
 
-    // 外描边：比填充亮一档，就是"玻璃边缘"
-    g.setColour (palette.text.withAlpha (0.16f));
-    g.drawRoundedRectangle (area.reduced (0.5f), 22.0f, 1.2f);
-
-    // 顶部内侧一道高光
-    {
-        juce::Path topEdge;
-        topEdge.addRoundedRectangle (area.getX() + 18.0f, area.getY() + 1.2f,
-                                     area.getWidth() - 36.0f, 10.0f, 5.0f);
-        g.setColour (palette.text.withAlpha (0.10f));
-        g.fillPath (topEdge);
+        g.setColour (palette.text.withAlpha (0.16f));
+        g.drawRoundedRectangle (area.reduced (0.5f), 22.0f, 1.2f);
     }
 
     if (tapMode)
@@ -3088,9 +3672,12 @@ void LyricSyncEditor::paintHud (juce::Graphics& g)
     if (r.getWidth() < 220.0f)
         return;
 
-    // 淡底：自定义背景图时保证读数条可读
-    g.setColour (juce::Colours::black.withAlpha (0.30f));
-    g.fillRoundedRectangle (r.expanded (8.0f, 5.0f), 8.0f);
+    // 淡底只在自定义背景图 / 浅色皮肤上出现，纯黑底不需要
+    if (palette.text.getPerceivedBrightness() < 0.5f || skinIndex == 5)
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.30f));
+        g.fillRoundedRectangle (r.expanded (8.0f, 5.0f), 8.0f);
+    }
 
     const bool playing = standaloneMode ? processor.standalonePlaying.load()
                                         : processor.isPlaying.load();
@@ -3544,7 +4131,19 @@ void LyricSyncEditor::timerCallback()
 void LyricSyncEditor::updateLabels (double t)
 {
     juce::ignoreUnused (t);
-    offsetLabel.setText (juce::String (offsetMs, 0) + " ms", juce::dontSendNotification);
+
+    // 偏移按秒显示（设计稿：−1.8 s），字号按像素显示（140 px = 1.0 倍）
+    {
+        const double secs = offsetMs / 1000.0;
+        const auto minus = juce::String::fromUTF8 ("\xe2\x88\x92");        // −
+        const auto txt = (secs < -0.049 ? minus : juce::String())
+                       + juce::String (std::abs (secs), 1) + " s";
+
+        offsetLabel.setText (txt, juce::dontSendNotification);
+        fontLabel  .setText (juce::String (juce::roundToInt (140.0 * fontScale))
+                                + tr (Lang::TextId::fontPx), juce::dontSendNotification);
+    }
+
     audioLabel .setText (audioRangeText(), juce::dontSendNotification);
 
     auto label = fileDescription;
@@ -3648,6 +4247,22 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
 {
     if (button == &loadButton)          { openFileDialog(); return; }
     if (button == &pasteButton)         { enterEditMode(); return; }
+    if (button == &orientButton)
+    {
+        setOrientation (orientation == Orientation::horizontal ? Orientation::vertical
+                                                               : Orientation::horizontal);
+        return;
+    }
+    if (button == &castButton)
+    {
+        lastWarning = tr (Lang::TextId::castSoon);
+        repaint();
+        return;
+    }
+    if (button == &fontMinusButton)     { fontStep (-5); return; }
+    if (button == &fontPlusButton)      { fontStep (5);  return; }
+    if (button == &segLineButton)       { setAdvanceMode (0); return; }
+    if (button == &segWordButton)       { setAdvanceMode (1); return; }
     if (button == &demoButton)
     {
         loadLyricsText (demoLyricsText (language), tr (Lang::TextId::demoLyrics), true);
@@ -3840,6 +4455,34 @@ void LyricSyncEditor::sliderValueChanged (juce::Slider* slider)
 }
 
 //==============================================================================
+/** 字号步进器：140 px 为 1.0 倍，A- / A+ 每次 5 px。 */
+void LyricSyncEditor::fontStep (int px)
+{
+    const double next = juce::jlimit (kFontScaleMin, kFontScaleMax,
+                                      fontScale + static_cast<double> (px) / 140.0);
+
+    if (std::abs (next - fontScale) < 1.0e-4)
+        return;
+
+    fontScale = next;
+    fontSlider.setValue (fontScale, juce::dontSendNotification);
+    processor.setSetting (Settings::fontScale, fontScale);
+    saveUiPrefs();
+    updateLabels (displayTime);
+    repaint();
+}
+
+void LyricSyncEditor::setAdvanceMode (int mode)
+{
+    advanceMode = juce::jlimit (0, 1, mode);
+    processor.setSetting (Settings::advance, advanceMode);
+    advanceBox.setSelectedId (advanceMode + 1, juce::dontSendNotification);
+    segLineButton.setToggleState (advanceMode == 0, juce::dontSendNotification);
+    segWordButton.setToggleState (advanceMode == 1, juce::dontSendNotification);
+    repaint();
+}
+
+//==============================================================================
 void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 {
     // 文本框右键：显示跟随语言的菜单
@@ -3919,6 +4562,40 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
         offsetScrub   = true;
         offsetScrubMs = offsetMs;
         return;
+    }
+
+    // 按住「字号」数值框拖动：无极调节，2 逻辑像素 = 1 px
+    if (e.eventComponent == &fontLabel && ! editing && ! tapMode)
+    {
+        fontScrub   = true;
+        fontScrubPx = 140.0 * fontScale;
+        return;
+    }
+
+    // 搜索框右侧小圆钮：从 LX Music 取当前播放歌词
+    if (e.eventComponent == this && ! editing && ! tapMode
+        && sideSearchRefresh().expanded (2.0f).contains (toLogicalPoint (e.position)))
+    {
+        startLxFetch();
+        return;
+    }
+
+    // 搜索结果：点一条就直接载入
+    if (e.eventComponent == this && ! editing && ! tapMode && ! searchResults.empty()
+        && (orientation == Orientation::vertical || railWidth() > 60.0f))
+    {
+        const auto p = toLogicalPoint (e.position);
+        const int idx = sideResultAt (p);
+
+        if (idx >= 0 && idx < static_cast<int> (searchResults.size()))
+        {
+            searchSel = idx;
+            loadSelectedResult();
+            return;
+        }
+
+        if (sideResultsArea().contains (p))
+            return;
     }
 
     // 右下角读数条：播放/暂停、测速、撤销、拖动定位
@@ -4148,6 +4825,17 @@ void LyricSyncEditor::mouseDrag (const juce::MouseEvent& e)
         return;
     }
 
+    if (fontScrub)
+    {
+        const double dx = e.getDistanceFromDragStartX() / juce::jmax (0.01f, uiScaleX);
+        const double px = juce::jlimit (140.0 * kFontScaleMin, 140.0 * kFontScaleMax,
+                                        fontScrubPx + dx * 0.5);
+        fontScale = px / 140.0;
+        processor.setSetting (Settings::fontScale, fontScale);
+        repaint();
+        return;
+    }
+
     if (standaloneSeekDragging && e.eventComponent == this)
     {
         seekStandaloneAt (toLogicalPoint (e.position));
@@ -4254,6 +4942,20 @@ void LyricSyncEditor::mouseWheelMove (const juce::MouseEvent& e,
         return;
     }
 
+    // 内联搜索结果：滚轮翻页（不按住 Ctrl，也不需要点进面板）
+    if (! mod && e.eventComponent == this && ! searchResults.empty()
+        && sideResultsArea().transformedBy (uiTransform).contains (e.position))
+    {
+        const int total = static_cast<int> (searchResults.size());
+        const int fit   = static_cast<int> (sideResultRows().size());
+        const int maxScroll = juce::jmax (0, total - fit);
+
+        searchScroll = juce::jlimit (0, maxScroll,
+                                     searchScroll + (wheel.deltaY > 0.0f ? -1 : 1));
+        repaint();
+        return;
+    }
+
     // 只有「鼠标停在歌词区 + 按住 Ctrl」才改字号，其它情况照常把滚轮交给别处
     if (! mod || e.eventComponent != this
         || settingsOpen || aboutOpen || editing || tapMode
@@ -4302,6 +5004,14 @@ void LyricSyncEditor::mouseUp (const juce::MouseEvent&)
     if (offsetScrub)
     {
         offsetScrub = false;
+        saveUiPrefs();
+        repaint();
+    }
+
+    if (fontScrub)
+    {
+        fontScrub = false;
+        saveUiPrefs();
         repaint();
     }
 
@@ -4477,25 +5187,27 @@ void LyricSyncEditor::showSettings (bool shouldShow)
 //==============================================================================
 void LyricSyncEditor::showSearch (bool shouldShow)
 {
-    searchOpen = shouldShow;
+    // 在线搜词已改为侧栏内联：这里只负责把焦点交给搜索框，不再有弹窗
+    searchOpen = false;
 
-    if (searchOpen)
+    if (! shouldShow)
     {
-        if (annotateMode)
-            exitAnnotateMode();
-
-        settingsOpen = false;
-        aboutOpen = false;
-        searchStatus = tr (Lang::TextId::onlineStartHint);
-        searchDiag = {};
-        searchStartedMs = 0.0;
+        repaint();
+        return;
     }
+
+    if (annotateMode)
+        exitAnnotateMode();
+
+    settingsOpen = false;
+    aboutOpen = false;
+    searchStartedMs = 0.0;
 
     updateVisibility();
     resized();
     repaint();
 
-    if (searchOpen)
+    if (searchTitleEditor.isVisible())
         searchTitleEditor.grabKeyboardFocus();
 }
 
@@ -6417,6 +7129,34 @@ void LyricSyncEditor::toggleZenMode()
 //==============================================================================
 void LyricSyncEditor::mouseDoubleClick (const juce::MouseEvent& e)
 {
+    // 双击步进器数值 = 回默认（偏移 0 / 字号 140 px）
+    if (e.eventComponent == &offsetLabel)
+    {
+        offsetScrub = false;
+        offsetHistory.push_back (offsetMs);
+
+        if (offsetHistory.size() > 60)
+            offsetHistory.erase (offsetHistory.begin());
+
+        offsetMs = 0.0;
+        processor.setSetting (Settings::offsetMs, offsetMs);
+        updateLabels (displayTime);
+        repaint();
+        return;
+    }
+
+    if (e.eventComponent == &fontLabel)
+    {
+        fontScrub = false;
+        fontScale = 1.0;
+        fontSlider.setValue (fontScale, juce::dontSendNotification);
+        processor.setSetting (Settings::fontScale, fontScale);
+        saveUiPrefs();
+        updateLabels (displayTime);
+        repaint();
+        return;
+    }
+
     if (settingsOpen || aboutOpen || editing || tapMode)
         return;
 

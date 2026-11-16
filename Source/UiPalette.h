@@ -12,20 +12,21 @@ struct UiPalette
 
     static UiPalette dark()
     {
+        // 近黑极简：画布 #08080a、侧栏 #0e0e11、舞台 #030304（与设计稿一致，不带蓝调）
         UiPalette p;
-        p.bgTop      = juce::Colour (0xff121a29);
-        p.bgBottom   = juce::Colour (0xff070a12);
-        p.panel      = juce::Colour (0xff161e2e);
-        p.panelEdge  = juce::Colour (0xff4a5a78);
-        p.card       = juce::Colour (0xff131a27);
-        p.text       = juce::Colour (0xfff2f5ff);
-        p.dim        = juce::Colour (0xff9aa5bf);
-        p.faint      = juce::Colour (0xff5f6a85);
+        p.bgTop      = juce::Colour (0xff0a0a0c);
+        p.bgBottom   = juce::Colour (0xff050506);
+        p.panel      = juce::Colour (0xff131316);
+        p.panelEdge  = juce::Colour (0xff26262b);
+        p.card       = juce::Colour (0xff141417);
+        p.text       = juce::Colour (0xfff2f2f4);
+        p.dim        = juce::Colour (0xffa1a1aa);
+        p.faint      = juce::Colour (0xff63636d);
         p.accent     = juce::Colour (0xff5ce1c1);
         p.accentSoft = juce::Colour (0xff3aa88f);
         p.warn       = juce::Colour (0xffffb86b);
         p.ok         = juce::Colour (0xff74e08a);
-        p.track      = juce::Colour (0xff2b3247);
+        p.track      = juce::Colour (0xff2a2a31);
         p.stageTint  = juce::Colour (0x00000000);
         return p;
     }
