@@ -76,6 +76,7 @@ TABLE = [
 
     #--- 打轴（Tap timing） -------------------------------------------------
     ("tapStart",         "开始打轴", "Tap Timing"),
+    ("tapRecordThis",    "记录本句", "Stamp"),
     ("tapTitle",         "编辑歌词", "EDIT LYRICS"),
     ("tapHint",          "播放到这一句开始时：点击画面空白处，或按空格",
                          "When this line starts: click the stage, or press Space"),
@@ -97,7 +98,8 @@ TABLE = [
     ("tapHostKeyHint",   "已向宿主发送空格键；没有反应说明宿主改过播放快捷键",
                          "Sent Space to the host - no reaction means its shortcut differs"),
     ("tapEditTitle",     "编辑这一句", "Edit line"),
-    ("tapSpaceHint",     "空格 = 记录本句", "Space = stamp this line"),
+    ("tapSpaceHint",     "空格 = 记录本句", "Space = stamp"),
+    ("tipStamp",         "把当前播放位置记录为本句歌词（等同于按空格）", "Stamp the current playhead position to this line (same as Space)"),
     ("tapRowText",       "歌词文字", "Text"),
     ("tapRowTime",       "时间码", "Timecode"),
     ("tapRowRestamp",    "重新打点", "Stamp now"),

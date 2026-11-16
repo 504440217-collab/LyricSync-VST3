@@ -174,6 +174,7 @@ private:
     juce::Rectangle<float> sideFontStepper() const;
     juce::Rectangle<float> sideSegArea() const;
     juce::Rectangle<float> sideToolsRow() const;
+
     int  sideResultAt (juce::Point<float> logical) const;
     void fontStep (int px);
     void setAdvanceMode (int mode);
@@ -488,6 +489,7 @@ private:
     juce::TextButton  applyTextButton;
     juce::TextButton  cancelTextButton;
     juce::TextButton  tapStartButton;
+    juce::TextButton  padStampButton;         // 记录本句（空格）
     juce::TextButton  tapUndoButton;
     juce::TextButton  tapRestartButton;
     juce::TextButton  tapNudgeBackButton;

@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.0.5";
+    const char* const kVersion = "2.0.6";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -650,7 +650,8 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
                      &minusButton, &plusButton, &resetButton,
                      &demoPlayButton, &demoStopButton,
                      &applyTextButton, &cancelTextButton,
-                     &tapStartButton, &tapUndoButton, &tapFinishButton, &tapExitButton,
+                     &tapStartButton, &padStampButton,
+                     &tapUndoButton, &tapFinishButton, &tapExitButton,
                      &tapRestartButton, &tapNudgeBackButton, &tapNudgeFwdButton, &tapPauseButton,
                      &tapHostTransportButton,
                      &tapRowRestampButton, &tapRowApplyButton, &tapRowCancelButton,
@@ -1014,6 +1015,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     demoClockToggle .setButtonText (tr (Lang::TextId::manualPreview));
 
     tapStartButton  .setButtonText (tr (Lang::TextId::tapStart));
+    padStampButton  .setButtonText (tr (Lang::TextId::tapRecordThis));
     tapUndoButton   .setButtonText (tr (Lang::TextId::tapUndo));
     tapFinishButton .setButtonText (tr (Lang::TextId::tapFinish));
     tapExitButton   .setButtonText (tr (Lang::TextId::tapExit));
@@ -1123,6 +1125,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     applyTextButton .setTooltip (tr (Lang::TextId::tipApply));
     cancelTextButton.setTooltip (tr (Lang::TextId::tipCancel));
     tapStartButton  .setTooltip (tr (Lang::TextId::tipTap));
+    padStampButton  .setTooltip (tr (Lang::TextId::tipStamp));
     tapUndoButton   .setTooltip (tr (Lang::TextId::tipUndo));
     tapFinishButton .setTooltip (tr (Lang::TextId::tipFinish));
     tapExitButton   .setTooltip (tr (Lang::TextId::tipExit));
@@ -1334,6 +1337,7 @@ void LyricSyncEditor::updateVisibility()
 
     const bool tapMain = tapMode && ! overlay && tapEditIndex < 0;
 
+    padStampButton  .setVisible (tapMode && ! overlay);
     tapUndoButton   .setVisible (tapMain);
     tapRestartButton.setVisible (tapMain);
     tapNudgeBackButton.setVisible (tapMain);
@@ -1649,6 +1653,13 @@ void LyricSyncEditor::styleSidebarControls()
                                               light ? juce::Colour (0xff98a2b8)
                                                     : juce::Colour (0xff63636d));
 
+    // 「记录本句」：强调色描边 + 淡青底
+    padStampButton.setColour (juce::TextButton::buttonColourId, onBg);
+    padStampButton.setColour (juce::TextButton::buttonOnColourId, onBg);
+    padStampButton.setColour (juce::TextButton::textColourOffId, onFg);
+    padStampButton.setColour (juce::TextButton::textColourOnId, onFg);
+    padStampButton.getProperties().set ("flat", true);
+
     offsetLabel.setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     offsetLabel.setColour (juce::Label::textColourId, light ? juce::Colour (0xff2b3242)
                                                             : juce::Colour (0xfff2f2f4));
@@ -1838,6 +1849,17 @@ void LyricSyncEditor::resized()
                 tx += w2 + 6.0f;
             };
 
+            // 侧栏展开时「记录本句」放侧栏底部；收起后才挤进舞台按钮行
+            if (railWidth() > 60.0f)
+            {
+                padStampButton.setBounds (scaledRect (12.0f, baseH() - 66.0f,
+                                                      railWidth() - 24.0f, 30.0f));
+            }
+            else
+            {
+                put (padStampButton, 96.0f);
+            }
+
             put (tapUndoButton, 74.0f);
             put (tapRestartButton, 96.0f);
             put (tapNudgeBackButton, 62.0f);
@@ -1870,9 +1892,10 @@ void LyricSyncEditor::resized()
         }
         else if (tapMode)
         {
-            tapUndoButton      .setBounds (scaledRect (ox + 22, 566, 168, 30));
-            tapRestartButton   .setBounds (scaledRect (ox + 198, 566, 168, 30));
-            tapFinishButton    .setBounds (scaledRect (ox + 374, 566, 168, 30));
+            padStampButton     .setBounds (scaledRect (ox + 22, 566, 150, 30));
+            tapUndoButton      .setBounds (scaledRect (ox + 180, 566, 120, 30));
+            tapRestartButton   .setBounds (scaledRect (ox + 308, 566, 120, 30));
+            tapFinishButton    .setBounds (scaledRect (ox + 436, 566, 120, 30));
 
             tapNudgeBackButton .setBounds (scaledRect (ox + 22, 602, 96, 30));
             tapNudgeFwdButton  .setBounds (scaledRect (ox + 126, 602, 96, 30));
@@ -2649,9 +2672,9 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
         g.setColour (lineCol.withAlpha (0.7f));
         g.drawLine (12.0f, 116.0f, railW - 12.0f, 116.0f, 1.0f);
 
-        // 底部：空格 = 记录本句
-        drawText (g, juce::Rectangle<float> (12.0f, baseH() - 40.0f, railW - 24.0f, 18.0f),
-                  tr (Lang::TextId::tapSpaceHint), 10.5f, txt3, false, -1.0f, {}, 1.0f,
+        // 底部小字：空格同效（按钮本体在 resized() 里布局）
+        drawText (g, juce::Rectangle<float> (12.0f, baseH() - 84.0f, railW - 24.0f, 16.0f),
+                  tr (Lang::TextId::tapSpaceHint), 10.0f, txt3, false, -1.0f, {}, 1.0f,
                   juce::Justification::centredLeft);
 
         return;
@@ -4389,6 +4412,7 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
     }
 
     if (button == &tapStartButton)      { enterTapMode(); return; }
+    if (button == &padStampButton)      { stampTap(); return; }
     if (button == &tapUndoButton)       { undoStamp(); return; }
     if (button == &tapRestartButton)
     {
@@ -6039,8 +6063,17 @@ void LyricSyncEditor::enterTapMode()
 
     if (plain.empty())
     {
-        lastWarning = tr (Lang::TextId::tapNoLines);
-        repaint();
+        // 没歌词就先打开大文本框让用户粘贴，别只给一句警告
+        if (! editing)
+        {
+            lastWarning = tr (Lang::TextId::tapNoLines);
+            enterEditMode();
+        }
+        else
+        {
+            lastWarning = tr (Lang::TextId::tapNoLines);
+            repaint();
+        }
         return;
     }
 
