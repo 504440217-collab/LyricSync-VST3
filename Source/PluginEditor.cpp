@@ -1336,10 +1336,14 @@ void LyricSyncEditor::styleSidebarControls()
     const auto onBg = light ? juce::Colour (0xffd9f2ea) : juce::Colour (0xff1b3330);
     const auto onFg = light ? juce::Colour (0xff0e9e86) : juce::Colour (0xff5ce1c1);
 
+    // gearButton 是 IconButton（自绘齿轮），单独设置
+    gearButton.normalColour = fg;
+    gearButton.hoverColour  = light ? juce::Colour (0xff2b3242) : juce::Colour (0xfff2f2f4);
+
     for (auto* b : { &loadButton, &pasteButton, &onlineLyricsButton,
                      &setStartButton, &undoSetStartButton,
                      &minusButton, &plusButton, &resetButton,
-                     &gearButton, &annotateButton, &exportButton })
+                     &annotateButton, &exportButton })
     {
         b->setColour (juce::TextButton::buttonColourId, bg);
         b->setColour (juce::TextButton::buttonOnColourId, onBg);
