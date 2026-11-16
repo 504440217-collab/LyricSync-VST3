@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.0.6";
+    const char* const kVersion = "2.0.7";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -717,7 +717,6 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     addLabel (offsetLabel, 11.5f, false, juce::Justification::centred);
     addLabel (fileLabel,   11.5f, false, juce::Justification::centredLeft);
     addLabel (hintLabel,   11.0f, false, juce::Justification::centredLeft);
-    hintLabel.setMouseCursor (juce::MouseCursor::PointingHandCursor);
     hintLabel.addMouseListener (this, false);      // 点提示词 -> 换下一条
     addLabel (fontLabel,   11.5f, false, juce::Justification::centred);
     addLabel (audioLabel,  11.5f, false, juce::Justification::centredRight);
@@ -1329,7 +1328,7 @@ void LyricSyncEditor::updateVisibility()
     // 这三个 Label 不在上面那批里，之前漏掉，导致退出全屏后提示词永久消失。
     fileLabel .setVisible (normal);
     audioLabel.setVisible (normal);
-    hintLabel .setVisible (normal && showHints);
+    hintLabel .setVisible (false);   // 左下角功能介绍按用户要求移除
 
     applyTextButton .setVisible (editing && ! overlay);
     cancelTextButton.setVisible (editing && ! overlay);
@@ -2048,14 +2047,25 @@ void LyricSyncEditor::resized()
 
             if (! rr.isEmpty())
             {
-                // 时间码 / 歌词 两个输入框直接盖在那一行上
-                const float rowH = rr.getHeight() - 2.0f;
+                // 侧栏展开：时间码 / 歌词上下两行，直接盖在那一行的位置上
+                if (railWidth() > 60.0f)
+                {
+                    tapTimeEditor.setBounds (scaledRect (rr.getX() + 24.0f, rr.getY() + 1.0f,
+                                                         rr.getWidth() - 58.0f, 19.0f));
+                    tapTextEditor.setBounds (scaledRect (rr.getX() + 24.0f, rr.getY() + 20.0f,
+                                                         rr.getWidth() - 58.0f, 19.0f));
+                }
+                else
+                {
+                    // 收起态：列表还在舞台右侧，维持原来的单行排布
+                    const float rowH = rr.getHeight() - 2.0f;
 
-                tapTimeEditor.setBounds (scaledRect (rr.getX() + 24.0f, rr.getY() + 1.0f,
-                                                     92.0f, rowH));
-                tapTextEditor.setBounds (scaledRect (rr.getX() + 122.0f, rr.getY() + 1.0f,
-                                                     juce::jmax (60.0f, rr.getWidth() - 166.0f),
-                                                     rowH));
+                    tapTimeEditor.setBounds (scaledRect (rr.getX() + 24.0f, rr.getY() + 1.0f,
+                                                         92.0f, rowH));
+                    tapTextEditor.setBounds (scaledRect (rr.getX() + 122.0f, rr.getY() + 1.0f,
+                                                         juce::jmax (60.0f, rr.getWidth() - 166.0f),
+                                                         rowH));
+                }
 
                 // 三个动作按钮落在列表下方那一条
                 const float by = stage.getBottom() - 32.0f;
@@ -2894,9 +2904,10 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
                     4 - static_cast<int> (std::ceil (juce::jmax (0.0, beatsLeft))) + 1);
                 countInBpm = bpmNow;
 
-                const float r    = 17.0f * widthScale;    // 半径 17 → 直径 34，与正文字号一致
-                const float gap  = 52.0f * widthScale;
-                const float dotY = centreY + 4.0f;
+                // 圆点直径与正文字号一致；间距留足，四点整齐排在文字上方，不重叠
+                const float r    = 17.0f * widthScale;
+                const float gap  = r * 3.2f;              // 相邻圆心距 > 2r，绝不重叠
+                const float dotY = centreY - 52.0f * widthScale;
 
                 for (int i = 0; i < 4; ++i)
                 {
@@ -2909,7 +2920,7 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
                 }
 
                 drawText (g, juce::Rectangle<float> (area.getX() + 60.0f,
-                                                     dotY + r + 12.0f,
+                                                     dotY + r + 10.0f,
                                                      area.getWidth() - 120.0f, 18.0f),
                           tr (Lang::TextId::bpmPrefix) + juce::String (countInBpm, 1),
                           11.0f * widthScale, palette.faint, false);
@@ -2941,7 +2952,8 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
             const float alpha = juce::jmax (0.10f, 1.0f - 0.34f * ad);
 
             const float y = centreY + d * spacing - size * 0.70f
-                          - (isCurrent ? lift : 0.0f);
+                          - (isCurrent ? lift : 0.0f)
+                          + (countInLit >= 0 ? 54.0f * widthScale : 0.0f);
 
             const auto lineRect = juce::Rectangle<float> (area.getX() + 40.0f, y,
                                                           area.getWidth() - 80.0f,
@@ -3071,8 +3083,10 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
                                ? doc.line (vocalStart).time
                                : (doc.isEmpty() ? 0.0 : doc.line (0).time);
 
-        // 倒数时「前奏」字样上移，给下面的 4 个圆点让位
-        const float introY = (countInLit >= 0) ? centreY - 62.0f : centreY - 13.0f;
+        // 倒数时「前奏」字样移到四个圆点上方，互不遮挡
+        const float introY = (countInLit >= 0)
+                           ? centreY - 96.0f * static_cast<float> (fontScale)
+                           : centreY - 13.0f;
 
         drawText (g, juce::Rectangle<float> (area.getX() + 60.0f, introY,
                                              area.getWidth() - 120.0f, 26.0f),
@@ -3254,7 +3268,10 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
     float mainX = area.getX() + 40.0f;
     float mainW = area.getWidth() - 80.0f;
 
-    if (! v && hasList)
+    // 列表挪进侧栏后不再挤占舞台，主内容铺满
+    const bool listInSide = (! v && railWidth() > 60.0f);
+
+    if (! v && hasList && ! listInSide)
         mainW = rows[0].getX() - mainX - 24.0f;
 
     const float cx = mainX;
@@ -3329,11 +3346,14 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
     {
         const auto ids = tapListIndices();
 
-        drawText (g, juce::Rectangle<float> (rows[0].getX(), rows[0].getY() - 20.0f,
-                                             rows[0].getWidth(), 16.0f),
-                  tr (Lang::TextId::tapListTitle), 10.0f * widthScale,
-                  palette.faint, false, -1.0f, {}, 1.0f,
-                  juce::Justification::centredLeft);
+        if (! listInSide)
+        {
+            drawText (g, juce::Rectangle<float> (rows[0].getX(), rows[0].getY() - 20.0f,
+                                                 rows[0].getWidth(), 16.0f),
+                      tr (Lang::TextId::tapListTitle), 10.0f * widthScale,
+                      palette.faint, false, -1.0f, {}, 1.0f,
+                      juce::Justification::centredLeft);
+        }
 
         for (int i = 0; i < static_cast<int> (rows.size()); ++i)
         {
@@ -3366,17 +3386,37 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
             g.drawText (juce::String (li + 1), ri.removeFromLeft (24),
                         juce::Justification::centredRight, false);
 
-            g.setColour (thisArmed ? palette.warn : palette.accent);
-            g.setFont (uiFont (10.5f, true));
-            g.drawText (formatTimecode (tapTimes[(size_t) li]),
-                        ri.removeFromLeft (92),
-                        juce::Justification::centredLeft, false);
+            if (listInSide)
+            {
+                // 侧栏两行：第一行时间码，第二行歌词，右边留给环形重打钮
+                const auto textW = ri.getWidth() - static_cast<int> (armRect.getWidth()) - 4;
 
-            g.setColour (thisArmed ? palette.text : palette.dim);
-            g.setFont (uiFont (10.5f));
-            g.drawText (tapLines[(size_t) li],
-                        ri.withTrimmedLeft (6).withTrimmedRight (static_cast<int> (armRect.getWidth()) + 4),
-                        juce::Justification::centredLeft, true);
+                g.setColour (thisArmed ? palette.warn : palette.accent);
+                g.setFont (uiFont (10.5f, true));
+                g.drawText (formatTimecode (tapTimes[(size_t) li]),
+                            juce::Rectangle<int> (ri.getX(), ri.getY(), textW, 19),
+                            juce::Justification::centredLeft, false);
+
+                g.setColour (thisArmed ? palette.text : palette.dim);
+                g.setFont (uiFont (10.5f));
+                g.drawText (tapLines[(size_t) li],
+                            juce::Rectangle<int> (ri.getX(), ri.getY() + 19, textW, 19),
+                            juce::Justification::centredLeft, true);
+            }
+            else
+            {
+                g.setColour (thisArmed ? palette.warn : palette.accent);
+                g.setFont (uiFont (10.5f, true));
+                g.drawText (formatTimecode (tapTimes[(size_t) li]),
+                            ri.removeFromLeft (92),
+                            juce::Justification::centredLeft, false);
+
+                g.setColour (thisArmed ? palette.text : palette.dim);
+                g.setFont (uiFont (10.5f));
+                g.drawText (tapLines[(size_t) li],
+                            ri.withTrimmedLeft (6).withTrimmedRight (static_cast<int> (armRect.getWidth()) + 4),
+                            juce::Justification::centredLeft, true);
+            }
 
             // 右侧「重打这一句」：一个环形箭头，点了就进入预备状态
             {
@@ -3877,19 +3917,12 @@ void LyricSyncEditor::paintHud (juce::Graphics& g)
 
         const float cx = b.getCentreX(), cy = b.getCentreY();
 
-        juce::Path arc;
-        arc.addCentredArc (cx, cy, 5.0f, 5.0f, 0.0f,
-                           juce::MathConstants<float>::pi * 0.30f,
-                           juce::MathConstants<float>::pi * 1.80f, true);
-
+        // 测速 = 秒表：完整圆环 + 从中心指向右上的指针 + 顶部按钮
         g.setColour (palette.dim);
-        g.strokePath (arc, juce::PathStrokeType (1.3f));
-
-        juce::Path head;
-        head.addTriangle (cx - 1.4f, cy - 6.6f,
-                          cx + 3.6f, cy - 4.4f,
-                          cx - 0.6f, cy - 1.6f);
-        g.fillPath (head);
+        g.drawEllipse (cx - 5.2f, cy - 5.2f, 10.4f, 10.4f, 1.3f);
+        g.drawLine (cx, cy, cx + 3.4f, cy - 3.0f, 1.3f);
+        g.fillEllipse (cx - 1.0f, cy - 1.0f, 2.0f, 2.0f);
+        g.drawLine (cx, cy - 5.2f, cx, cy - 7.0f, 1.2f);
     }
 
     //---- 撤销（↺）----
@@ -3901,18 +3934,21 @@ void LyricSyncEditor::paintHud (juce::Graphics& g)
 
         const float cx = b.getCentreX(), cy = b.getCentreY();
 
+        // 撤销 = ↺：大缺口圆弧（开口朝上）+ 箭头落在左上
         juce::Path arc;
-        arc.addCentredArc (cx, cy, 4.6f, 4.6f, 0.0f,
-                           juce::MathConstants<float>::pi * 0.95f,
-                           juce::MathConstants<float>::pi * 1.95f, true);
+        arc.addCentredArc (cx, cy, 4.8f, 4.8f, 0.0f,
+                           juce::MathConstants<float>::pi * 0.20f,
+                           juce::MathConstants<float>::pi * 1.86f, true);
 
         g.setColour (palette.dim);
-        g.strokePath (arc, juce::PathStrokeType (1.3f));
+        g.strokePath (arc, juce::PathStrokeType (1.4f,
+                        juce::PathStrokeType::curved,
+                        juce::PathStrokeType::rounded));
 
         juce::Path head;
-        head.addTriangle (cx - 6.4f, cy - 1.0f,
-                          cx - 1.6f, cy - 1.2f,
-                          cx - 4.2f, cy - 5.4f);
+        head.addTriangle (cx - 5.6f, cy - 4.6f,
+                          cx - 2.0f, cy - 6.4f,
+                          cx - 3.6f, cy - 1.8f);
         g.fillPath (head);
     }
 }
@@ -4273,7 +4309,7 @@ juce::String LyricSyncEditor::hintText() const
 void LyricSyncEditor::updateHint (bool force)
 {
     juce::ignoreUnused (force);
-    hintLabel.setText (showHints ? hintText() : juce::String(), juce::dontSendNotification);
+    // 左下角提示已移除，不再更新文字
 
     // 「界面提示」关掉时，鼠标悬停说明也一起关掉（连 TooltipWindow 都销毁，
     // 只 setVisible(false) 不行 —— 它自己的定时器会再把自己显示出来）
@@ -5265,14 +5301,21 @@ void LyricSyncEditor::mouseMove (const juce::MouseEvent& e)
         return;
     }
 
+    // 走带条（进度条 / 播放暂停 / 测速 / 撤销 / 时间码）保持普通鼠标箭头，
+    // 只有歌词区才是手形——用户明确要求，别在这里给手型光标。
     if (standaloneMode && ! editing && ! settingsOpen && ! aboutOpen && ! searchOpen
         && standaloneSeekBar.expanded (3.0f, 7.0f).contains (toLogicalPoint (e.position)))
     {
-        setMouseCursor (juce::MouseCursor::PointingHandCursor);
+        setMouseCursor (juce::MouseCursor::NormalCursor);
         return;
     }
 
-    const bool hand = ! editing && ! settingsOpen && ! aboutOpen
+    const auto logical = toLogicalPoint (e.position);
+    const bool overHud = ! zenMode && ! editing && ! tapMode && ! annotateMode
+                      && ! settingsOpen && ! aboutOpen && ! searchOpen
+                      && hudBounds().expanded (8.0f, 6.0f).contains (logical);
+
+    const bool hand = ! overHud && ! editing && ! settingsOpen && ! aboutOpen
                    && stageArea().transformedBy (uiTransform).contains (e.position);
 
     setMouseCursor (hand ? juce::MouseCursor::DraggingHandCursor
@@ -7030,19 +7073,23 @@ std::vector<int> LyricSyncEditor::tapListIndices() const
 
 juce::Rectangle<float> LyricSyncEditor::tapListTrack (juce::Rectangle<float> area) const
 {
-    const bool v = (orientation == Orientation::vertical);
+    const bool v    = (orientation == Orientation::vertical);
+    const bool side = (! v && railWidth() > 60.0f);
     const int  maxRows = v ? 4 : 7;
     const auto ids = tapListIndices();
 
     if (! tapMode || static_cast<int> (ids.size()) < maxRows)
         return {};
 
-    const float rowH = v ? 24.0f : 27.0f;
-    const float top  = area.getY() + 52.0f;
+    if (side)
+        area = tapListArea();
+
+    const float rowH = v ? 24.0f : (side ? 42.0f : 27.0f);
+    const float top  = area.getY() + (side ? 0.0f : 52.0f);
     const float h    = static_cast<float> (ids.size()) * rowH;
 
     // 滑块加宽到 9 px，抓起来更容易（行右缘正好也停在 right-30）
-    return { area.getRight() - 30.0f, top, 9.0f, h };
+    return { area.getRight() - (side ? 9.0f : 30.0f), top, 9.0f, h };
 }
 
 int LyricSyncEditor::tapListTotal() const
@@ -7125,6 +7172,23 @@ void LyricSyncEditor::scrollTapList (int deltaRows)
     }
 }
 
+/** 打轴列表区域：横版侧栏展开时放进侧栏中部（用户指定的位置）；竖版/收起态仍在舞台。 */
+juce::Rectangle<float> LyricSyncEditor::tapListArea() const
+{
+    if (orientation == Orientation::horizontal && railWidth() > 60.0f)
+    {
+        const float rail = railWidth();
+
+        // 侧栏：标题行 y=10..30、分组标题 y=44、说明 y=74..106、分隔线 y=116
+        // 列表从 y=126 起，到「记录本句」按钮上方（按钮在 baseH-66）为止。
+        const float top    = 126.0f;
+        const float bottom = baseH() - 116.0f;
+        return { 10.0f, top, rail - 20.0f, juce::jmax (60.0f, bottom - top) };
+    }
+
+    return stageArea();
+}
+
 std::vector<juce::Rectangle<float>> LyricSyncEditor::tapListRows (juce::Rectangle<float> area) const
 {
     std::vector<juce::Rectangle<float>> rows;
@@ -7136,7 +7200,12 @@ std::vector<juce::Rectangle<float>> LyricSyncEditor::tapListRows (juce::Rectangl
         return rows;
 
     const bool  v    = (orientation == Orientation::vertical);
-    const float rowH = v ? 24.0f : 27.0f;
+    const bool  side = (! v && railWidth() > 60.0f);
+    const float rowH = v ? 24.0f : (side ? 42.0f : 27.0f);
+
+    // 侧栏展开时忽略传进来的舞台区域，直接用侧栏中部
+    if (side)
+        area = tapListArea();
 
     for (int i = 0; i < n; ++i)
     {
@@ -7144,6 +7213,11 @@ std::vector<juce::Rectangle<float>> LyricSyncEditor::tapListRows (juce::Rectangl
         {
             const float y = area.getY() + 56.0f + static_cast<float> (i) * rowH;
             rows.push_back ({ area.getX() + 30.0f, y, area.getWidth() - 60.0f, rowH - 2.0f });
+        }
+        else if (side)
+        {
+            const float y = area.getY() + static_cast<float> (i) * rowH;
+            rows.push_back ({ area.getX(), y, area.getWidth(), rowH - 2.0f });
         }
         else
         {

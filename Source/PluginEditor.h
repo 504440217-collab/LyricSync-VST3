@@ -269,6 +269,7 @@ private:
     void restampTapRow();                  // 把这一行的时间改成当前播放位置
     void closeTapRowEditing();             // 取消编辑
     double parseTimecode (const juce::String& text) const;
+    juce::Rectangle<float> tapListArea() const;            // 列表所在区域：横版展开=侧栏，其余=舞台
     std::vector<juce::Rectangle<float>> tapListRows (juce::Rectangle<float> area) const;
     std::vector<int> tapListIndices() const;      // 已记录行的行号（与 tapListRows 一一对应）
     juce::Rectangle<float> tapListTrack (juce::Rectangle<float> area) const;  // 列表右侧滚动条
