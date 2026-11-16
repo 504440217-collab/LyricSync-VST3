@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.9.6";
+    const char* const kVersion = "1.9.7";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -47,6 +47,53 @@ namespace
         0xff22d3ee, 0xff4d9fff, 0xffa78bfa, 0xffff7ab6
     };
     const int kNumLineColours = static_cast<int> (sizeof (kLineColours) / sizeof (kLineColours[0]));
+
+    /**
+     *  判断一行是不是「作词 / 作曲 / 编曲 …」这类制作信息，而不是真正的歌词。
+     *  在线搜来的 LRC 常常前面挂十几行这种信息，倒数 4 拍必须落在正式唱词前，
+     *  而不是落在第一行（歌名或制作名单）上。
+     *  中文关键词用 UTF-8 字节转义写，源码保持纯 ASCII，避免 MSVC 代码页问题。
+     */
+    bool looksLikeCredit (const juce::String& text)
+    {
+        const auto t = text.trim();
+
+        if (t.isEmpty())
+            return true;
+
+        static const juce::StringArray cn = juce::StringArray::fromLines (
+            juce::String::fromUTF8 (
+                "\xe4\xbd\x9c\xe8\xaf\x8d\n\xe4\xbd\x9c\xe6\x9b\xb2\n"
+                "\xe7\xbc\x96\xe6\x9b\xb2\n\xe5\x88\xb6\xe4\xbd\x9c\xe4\xba\xba\n"
+                "\xe5\x87\xba\xe5\x93\x81\n\xe7\x9b\x91\xe5\x88\xb6\n"
+                "\xe6\xb7\xb7\xe9\x9f\xb3\n\xe6\xaf\x8d\xe5\xb8\xa6\n"
+                "\xe5\xbd\x95\xe9\x9f\xb3\n\xe5\x92\x8c\xe5\xa3\xb0\n"
+                "\xe5\x8e\x9f\xe5\x94\xb1\n\xe7\xbf\xbb\xe5\x94\xb1\n"
+                "\xe7\xad\x96\xe5\x88\x92\n\xe7\xbb\x9f\xe7\xad\xb9\n"
+                "\xe5\x90\x8e\xe6\x9c\x9f\n\xe5\xad\x97\xe5\xb9\x95\n"
+                "\xe7\xbf\xbb\xe8\xaf\x91\n\xe6\xa0\xa1\xe5\xaf\xb9\n"
+                "\xe5\xa1\xab\xe8\xaf\x8d\n\xe8\xb0\xb1\xe6\x9b\xb2\n"
+                "\xe6\xbc\x94\xe5\x94\xb1\n\xe8\xaf\x8d\xef\xbc\x9a\n"
+                "\xe6\x9b\xb2\xef\xbc\x9a"));
+
+        static const juce::StringArray en = juce::StringArray::fromLines (
+            "lyrics by\nlyricist\ncomposed by\ncomposer\narranged by\narranger\n"
+            "producer\nproduced by\nmixing\nmix by\nmastering\nmastered by\n"
+            "recorded\nrecording\nwritten by\nmusic by\nvocal\nguitar\nbass\n"
+            "drums\nkeyboard\npiano\nstrings\nchoir");
+
+        const auto lower = t.toLowerCase();
+
+        for (const auto& w : cn)
+            if (w.isNotEmpty() && t.contains (w))
+                return true;
+
+        for (const auto& w : en)
+            if (w.isNotEmpty() && lower.contains (w))
+                return true;
+
+        return false;
+    }
 
     /** 刷子图标：斜笔杆 + 笔头，纯 Path 绘制，不依赖字体里有没有该字形。 */
     void drawBrushIcon (juce::Graphics& g, juce::Rectangle<float> b, juce::Colour colour)
@@ -1810,6 +1857,41 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
 
     const auto currentTint = lyricColour();
 
+    //---- 前奏倒数：首个正式唱词前 4 拍，灰色半透明大数字压在歌词文字下层 -----
+    //  BPM 优先用自动测速结果，测不出来就用宿主/默认速度；不需要联网也不需要 AI：
+    //  倒数起点 = 首个唱词时间 - 4 * 每拍秒数，纯算术，零延迟。
+    const int vocalStart = firstVocalLineIndex();
+    int countInDigit = 0;
+
+    if (! doc.isEmpty() && vocalStart >= 0 && vocalStart < doc.size())
+    {
+        const double vocalTime = doc.line (vocalStart).time;
+        const double bpmNow = detectedBpm > 0.0 ? detectedBpm : processor.bpm.load();
+        const double spb = bpmNow > 20.0 ? 60.0 / bpmNow : 0.0;
+
+        if (spb > 0.0)
+        {
+            const double beatsLeft = (vocalTime - displayTime) / spb;
+
+            if (beatsLeft > 0.0 && beatsLeft <= 4.0)
+            {
+                countInDigit = juce::jlimit (1, 4,
+                    static_cast<int> (std::ceil (beatsLeft)));
+
+                const float numSize = juce::jmin (area.getWidth() * 0.30f,
+                                                  area.getHeight() * 0.38f);
+
+                drawText (g, juce::Rectangle<float> (area.getX(),
+                                                     centreY - numSize * 0.72f,
+                                                     area.getWidth(),
+                                                     numSize * 1.44f),
+                          juce::String (countInDigit), numSize,
+                          palette.text.withAlpha (countInDigit == 1 ? 0.15f : 0.09f),
+                          true, -1.0f, {}, 1.0f, juce::Justification::centred);
+            }
+        }
+    }
+
     for (int pass = 0; pass < 2; ++pass)
     {
         const int lo = static_cast<int> (std::floor (displayIndex)) - radius - 1;
@@ -1957,58 +2039,24 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
                   juce::Justification::centredRight);
     }
 
-    if (! hasCurrent)
+    if (! hasCurrent && countInDigit == 0)
     {
-        const double firstTime = doc.isEmpty() ? 0.0 : doc.line (0).time;
-        const double bpmNow = detectedBpm > 0.0 ? detectedBpm : processor.bpm.load();
-        const double secPerBeat = bpmNow > 20.0 ? 60.0 / bpmNow : 0.0;
+        // 正式唱词的时间（可能被前面的作词/作曲信息推后）
+        const double vocalTime = (vocalStart >= 0 && vocalStart < doc.size())
+                               ? doc.line (vocalStart).time
+                               : (doc.isEmpty() ? 0.0 : doc.line (0).time);
 
-        const double beatsLeft = secPerBeat > 0.0
-                               ? (firstTime - displayTime) / secPerBeat : 99.0;
-
-        // 第一句前 4 拍：打 4 个圆点倒数
-        const bool counting = secPerBeat > 0.0
-                           && beatsLeft > -0.30 && beatsLeft <= 4.35;
-
-        const float y = centreY - (counting ? 58.0f : 13.0f);
-
-        drawText (g, juce::Rectangle<float> (area.getX() + 60.0f, y,
+        drawText (g, juce::Rectangle<float> (area.getX() + 60.0f, centreY - 13.0f,
                                              area.getWidth() - 120.0f, 26.0f),
                   tr (Lang::TextId::intro), 17.0f * widthScale,
                   palette.faint, false);
 
-        if (! counting)
-        {
-            drawText (g, juce::Rectangle<float> (area.getX() + 60.0f, y + 30.0f,
-                                                 area.getWidth() - 120.0f, 20.0f),
-                      tr (Lang::TextId::nextLineIn)
-                        + juce::String (juce::jmax (0.0, firstTime - displayTime), 1)
-                        + tr (Lang::TextId::secondsSuffix),
-                      11.5f * widthScale, palette.faint, false);
-        }
-        else
-        {
-            const int lit = juce::jlimit (0, 4,
-                                          4 - static_cast<int> (std::ceil (juce::jmax (0.0, beatsLeft))) + 1);
-
-            const float r = 7.0f * widthScale;
-            const float gap = 34.0f * widthScale;
-            const float dotY = centreY + 6.0f;
-
-            for (int i = 0; i < 4; ++i)
-            {
-                const float cx = area.getCentreX() + (static_cast<float> (i) - 1.5f) * gap;
-                const bool on = i < lit;
-
-                g.setColour (on ? currentTint : palette.track);
-                g.fillEllipse (cx - r, dotY - r, r * 2.0f, r * 2.0f);
-            }
-
-            drawText (g, juce::Rectangle<float> (area.getX() + 60.0f, dotY + 22.0f,
-                                                 area.getWidth() - 120.0f, 20.0f),
-                      tr (Lang::TextId::bpmPrefix) + juce::String (bpmNow, 1),
-                      11.0f * widthScale, palette.faint, false);
-        }
+        drawText (g, juce::Rectangle<float> (area.getX() + 60.0f, centreY + 17.0f,
+                                             area.getWidth() - 120.0f, 20.0f),
+                  tr (Lang::TextId::nextLineIn)
+                    + juce::String (juce::jmax (0.0, vocalTime - displayTime), 1)
+                    + tr (Lang::TextId::secondsSuffix),
+                  11.5f * widthScale, palette.faint, false);
     }
 }
 
@@ -4884,6 +4932,21 @@ void LyricSyncEditor::undoSetStart()
 }
 
 //==============================================================================
+/** 第一个「正式唱词」行：跳过开头的作词、作曲、编曲这类制作信息。 */
+int LyricSyncEditor::firstVocalLineIndex() const
+{
+    const auto& d = processor.lyrics();
+
+    // 只在前 24 行里找：制作信息不会更长，也避免把中段歌词误判成 credit
+    const int limit = juce::jmin (d.size(), 24);
+
+    for (int i = 0; i < limit; ++i)
+        if (! looksLikeCredit (d.line (i).text))
+            return i;
+
+    return 0;
+}
+
 juce::Colour LyricSyncEditor::lineColourFor (int index, juce::Colour fallback) const
 {
     const auto it = lineStyles.find (index);

@@ -213,6 +213,7 @@ private:
     juce::Rectangle<float> styleCard() const;
     void loadLineStyles();
     void saveLineStyles();
+    int firstVocalLineIndex() const;      // 跳过作词/作曲等制作信息后的首句唱词
     juce::Colour lineColourFor (int index, juce::Colour fallback) const;
     juce::String lineNoteFor (int index) const;
 
