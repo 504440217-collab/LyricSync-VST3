@@ -5230,9 +5230,9 @@ void LyricSyncEditor::startSearch()
     if (searchBusy)
         return;
 
-    const auto title = searchTitleEditor.getText().trim();
+    auto typed = searchTitleEditor.getText().trim();
 
-    if (title.isEmpty())
+    if (typed.isEmpty())
     {
         searchStatus = tr (Lang::TextId::onlineEnterTitle);
         repaint();
@@ -5241,7 +5241,36 @@ void LyricSyncEditor::startSearch()
 
     commitCustomUrl();
 
-    const auto artist = searchArtistEditor.getText().trim();
+    // 一个输入框要能吃下「晴天 周杰伦」/「晴天 - 周杰伦」这种写法：
+    // 有 "-" 就按它切；否则按最后一个空格切（后半段不长时才算歌手）。
+    juce::String artist = searchArtistEditor.getText().trim();
+
+    if (artist.isEmpty())
+    {
+        const int dash = juce::jmax (typed.lastIndexOfChar ('-'),
+                                     typed.lastIndexOfChar ((juce::juce_wchar) 0x2014));
+
+        if (dash > 0 && dash < typed.length() - 1)
+        {
+            artist = typed.substring (dash + 1).trim();
+            typed  = typed.substring (0, dash).trim();
+        }
+        else
+        {
+            const int sp = typed.lastIndexOfChar (' ');
+
+            if (sp > 0 && typed.length() - sp > 1 && typed.length() - sp <= 17)
+            {
+                artist = typed.substring (sp + 1).trim();
+                typed  = typed.substring (0, sp).trim();
+            }
+        }
+
+        if (typed.isEmpty())
+            typed = artist;
+    }
+
+    const auto title = typed;
     const int duration = audioTotalSeconds > 0.0
                        ? static_cast<int> (audioTotalSeconds) : 0;
     const auto url = customSearchUrl;
