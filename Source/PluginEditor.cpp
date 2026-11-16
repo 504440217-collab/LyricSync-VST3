@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.9.4";
+    const char* const kVersion = "1.9.5";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -528,7 +528,8 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     demoClockToggle.setClickingTogglesState (true);
     hintToggle.setClickingTogglesState (true);
 
-    for (auto* box : { &languageBox, &zoomBox, &skinBox, &fontBox, &colourBox, &advanceBox })
+    for (auto* box : { &languageBox, &zoomBox, &skinBox, &fontBox, &colourBox, &advanceBox,
+                       &networkBox })
     {
         box->setEditableText (false);
         box->setJustificationType (juce::Justification::centred);
@@ -600,6 +601,7 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     lxUrlEditor.setText (lxMusicUrl, false);
     simplifyToggle.setClickingTogglesState (true);
     simplifyToggle.setToggleState (simplifyChinese, juce::dontSendNotification);
+    OnlineLyrics::setUseSystemProxy (useSystemProxy);
 
     tapTextEditor.setTextToShowWhenEmpty (tr (Lang::TextId::tapRowText), juce::Colours::grey);
     tapTimeEditor.setTextToShowWhenEmpty ("00:00.00", juce::Colours::grey);
@@ -673,6 +675,7 @@ void LyricSyncEditor::loadUiPrefs()
         else if (key == "customUrl")   customSearchUrl = value;
         else if (key == "lxUrl")       lxMusicUrl      = value;
         else if (key == "simplify")    simplifyChinese = value.getIntValue() != 0;
+        else if (key == "netProxy")    useSystemProxy   = value.getIntValue() != 0;
         else if (key == "bg" && value.isNotEmpty())
         {
             const juce::File bgFile (value);
@@ -710,6 +713,7 @@ void LyricSyncEditor::saveUiPrefs()
     lines.add ("customUrl=" + customSearchUrl);
     lines.add ("lxUrl=" + lxMusicUrl);
     lines.add ("simplify=" + juce::String (simplifyChinese ? 1 : 0));
+    lines.add ("netProxy=" + juce::String (useSystemProxy ? 1 : 0));
 
     f.replaceWithText (lines.joinIntoString ("\n"));
 }
@@ -914,6 +918,11 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     advanceBox.addItem (tr (Lang::TextId::advChar), 2);
     advanceBox.setSelectedId (advanceMode + 1, juce::dontSendNotification);
 
+    networkBox.clear (juce::dontSendNotification);
+    networkBox.addItem (tr (Lang::TextId::netDirect), 1);
+    networkBox.addItem (tr (Lang::TextId::netProxy), 2);
+    networkBox.setSelectedId (useSystemProxy ? 2 : 1, juce::dontSendNotification);
+
     updatingCombos = false;
 
     //---- Hover explanations -------------------------------------------------
@@ -969,6 +978,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     customUrlEditor   .setTooltip (tr (Lang::TextId::onlineUrlHint));
     lxUrlEditor       .setTooltip (tr (Lang::TextId::lxUrlHint));
     simplifyToggle    .setTooltip (tr (Lang::TextId::onlineSimplifyHint));
+    networkBox        .setTooltip (tr (Lang::TextId::netHint));
     searchLxButton    .setTooltip (tr (Lang::TextId::lxButtonHint));
     hintLabel       .setTooltip (tr (Lang::TextId::hintClick));
 
@@ -1154,6 +1164,7 @@ void LyricSyncEditor::updateVisibility()
     customUrlEditor.setVisible (settingsOpen);
     lxUrlEditor.setVisible (settingsOpen);
     simplifyToggle.setVisible (settingsOpen);
+    networkBox.setVisible (settingsOpen);
 
     clearImageButton.setEnabled (customBg.isValid());
 }
@@ -1464,7 +1475,9 @@ void LyricSyncEditor::resized()
         hintToggle.setBounds (scaledRect (ctrlX, y, ctrlW * 0.4f, 28));
         customUrlEditor.setBounds (scaledRect (ctrlX, y + rowH, ctrlW, 28));
         lxUrlEditor.setBounds (scaledRect (ctrlX, y + 2.0f * rowH, ctrlW, 28));
-        simplifyToggle.setBounds (scaledRect (ctrlX, y + 3.0f * rowH, ctrlW * 0.5f, 28));
+        simplifyToggle.setBounds (scaledRect (ctrlX, y + 3.0f * rowH, ctrlW * 0.46f, 28));
+        networkBox.setBounds (scaledRect (ctrlX + ctrlW * 0.5f + 6.0f, y + 3.0f * rowH,
+                                          ctrlW * 0.5f - 6.0f, 28));
     }
 
     //---- 在线搜词面板 -------------------------------------------------------
@@ -3197,6 +3210,15 @@ void LyricSyncEditor::comboBoxChanged (juce::ComboBox* box)
     if (box == &fontBox)      { setFontIndex (fontBox.getSelectedId() - 1); return; }
     if (box == &colourBox)    { setLyricColour (colourBox.getSelectedId() - 1); return; }
 
+    if (box == &networkBox)
+    {
+        useSystemProxy = (networkBox.getSelectedId() == 2);
+        OnlineLyrics::setUseSystemProxy (useSystemProxy);
+        saveUiPrefs();
+        repaint();
+        return;
+    }
+
     if (box == &advanceBox)
     {
         advanceMode = juce::jlimit (0, 1, advanceBox.getSelectedId() - 1);
@@ -3782,6 +3804,8 @@ void LyricSyncEditor::commitCustomUrl()
         lxMusicUrl = "http://127.0.0.1:23330";
 
     simplifyChinese = simplifyToggle.getToggleState();
+    useSystemProxy  = (networkBox.getSelectedId() == 2);
+    OnlineLyrics::setUseSystemProxy (useSystemProxy);
     saveUiPrefs();
 }
 

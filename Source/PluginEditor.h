@@ -351,6 +351,7 @@ private:
     juce::String customSearchUrl;            // 全局偏好里保存的自定义服务地址
     juce::String lxMusicUrl { "http://127.0.0.1:23330" };
     bool   simplifyChinese = true;           // 在线歌词繁体转简体
+    bool   useSystemProxy  = false;          // true = 走系统代理（v2rayN 等）
     std::vector<OnlineLyrics::Result> searchResults;
     int    searchSel    = -1;
     int    searchScroll = 0;
@@ -448,6 +449,7 @@ private:
     juce::TextButton  searchGoButton, searchLoadButton, searchLxButton;
     juce::TextEditor  lxUrlEditor;
     juce::TextButton  simplifyToggle;
+    juce::ComboBox    networkBox;        // 直连 / 跟随系统代理
     IconButton        closeSearchButton { IconButton::Icon::close };
     juce::TextEditor  searchTitleEditor, searchArtistEditor, customUrlEditor;
 

@@ -2,6 +2,7 @@
 #include "KrcLyrics.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <string>
 #include <utility>
@@ -18,6 +19,9 @@ namespace OnlineLyrics
 {
 namespace
 {
+    // 0 = 直连（WinHTTP NO_PROXY），1 = 跟随系统代理。GUI 线程写，后台线程读。
+    std::atomic<int> gUseProxy { 0 };
+
     const char* const kKugouHeaders =
         "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n"
         "Referer: https://www.kugou.com/\r\n";
@@ -109,7 +113,7 @@ namespace
      *  直连，并把 WinHTTP 的错误码带出来（12007 解析失败 / 12029 连不上 / 时间超时等）。
      */
     juce::String winHttpGet (const juce::String& url, const juce::String& headers,
-                             int& status, int& err, int timeoutMs)
+                             int& status, int& err, int timeoutMs, bool useProxy)
     {
         status = 0;
         err = 0;
@@ -122,8 +126,9 @@ namespace
             return {};
         }
 
-        HINTERNET session = WinHttpOpen (L"LyricSync/1.9.4 (VST3 lyrics plugin)",
-                                         WINHTTP_ACCESS_TYPE_NO_PROXY,
+        HINTERNET session = WinHttpOpen (L"LyricSync/1.9.5 (VST3 lyrics plugin)",
+                                         useProxy ? WINHTTP_ACCESS_TYPE_DEFAULT_PROXY
+                                                  : WINHTTP_ACCESS_TYPE_NO_PROXY,
                                          WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
 
         if (session == nullptr)
@@ -227,19 +232,25 @@ namespace
             *errorCode = 0;
 
        #if JUCE_WINDOWS
-        int winErr = 0;
-        auto viaWinHttp = winHttpGet (url, headers, status, winErr, timeoutMs);
-
-        if (status > 0)
+        // 只有「直连」模式用 WinHTTP。WinHTTP 的 DEFAULT_PROXY 读的是
+        // netsh winhttp 的配置，而不是 v2rayN / Clash 设置的 IE 系统代理，
+        // 所以「跟随系统代理」必须交给下面的 WinINet（juce::URL）。
+        if (gUseProxy.load() == 0)
         {
-            // HTTP 层已经通：即使 4xx/5xx 也把内容交给调用方判断，不重复请求
-            return viaWinHttp;
+            int winErr = 0;
+            auto viaWinHttp = winHttpGet (url, headers, status, winErr, timeoutMs, false);
+
+            if (status > 0)
+            {
+                // HTTP 层已经通：即使 4xx/5xx 也把内容交给调用方判断，不重复请求
+                return viaWinHttp;
+            }
+
+            if (errorCode != nullptr)
+                *errorCode = winErr;
+
+            status = 0;
         }
-
-        if (errorCode != nullptr)
-            *errorCode = winErr;
-
-        status = 0;
        #endif
 
         const auto options =
@@ -873,6 +884,7 @@ Outcome search (juce::String title, juce::String artist,
     }
 
     juce::String diag;
+    diag << (gUseProxy.load() != 0 ? "proxy " : "direct ");
 
     //---- 1. 自定义服务（填了就优先，失败再自动回退） -------------------------
     if (customUrl.trim().isNotEmpty())
@@ -976,6 +988,16 @@ Outcome search (juce::String title, juce::String artist,
     outcome.error = "notfound";
     outcome.detail = diag.trim();
     return outcome;
+}
+
+void setUseSystemProxy (bool shouldUse)
+{
+    gUseProxy.store (shouldUse ? 1 : 0);
+}
+
+bool isUsingSystemProxy()
+{
+    return gUseProxy.load() != 0;
 }
 
 juce::String download (const Result& result, bool simplify)

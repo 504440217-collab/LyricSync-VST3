@@ -50,6 +50,10 @@ namespace OnlineLyrics
         juce::String error;           // "connect" / "noLyric" / 空 = 成功
     };
 
+    /** 网络连接方式：false = WinHTTP 直连（默认）；true = 跟随系统代理（v2rayN 等）。 */
+    void setUseSystemProxy (bool shouldUse);
+    bool isUsingSystemProxy();
+
     /** 搜索。customUrl 支持 {q} {artist} {duration} 占位符，为空则不启用。 */
     Outcome search (juce::String title, juce::String artist,
                     int durationSec, juce::String customUrl);

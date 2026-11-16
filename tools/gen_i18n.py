@@ -375,6 +375,10 @@ TABLE = [
     ("onlineDiag",      "诊断", "Diag"),
     ("onlineFailed",    "请求失败，请检查网络或稍后重试", "Request failed; check your connection"),
     ("onlineTimeout",   "请求超时，已自动解锁，请再点一次「搜索」", "Timed out; press Search again"),
+    ("netDirect",       "网络：直连", "Net: direct"),
+    ("netProxy",        "网络：跟随系统代理", "Net: system proxy"),
+    ("netHint",         "直连适合普通国内网络；如果你靠 v2rayN / Clash 等代理上网，改成「跟随系统代理」再开代理",
+                        "Direct works on ordinary networks; choose system proxy if you reach the internet through v2rayN / Clash"),
 
     #--- 独立版走带 -----------------------------------------------------------
     ("standalonePlay",  "播放", "Play"),

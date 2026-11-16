@@ -274,6 +274,9 @@ namespace Lang
         onlineDiag,
         onlineFailed,
         onlineTimeout,
+        netDirect,
+        netProxy,
+        netHint,
         standalonePlay,
         standalonePause,
         tipStandalone
