@@ -271,6 +271,9 @@ namespace Lang
         onlineSimplifyOn,
         onlineSimplifyOff,
         onlineSimplifyHint,
+        onlineDiag,
+        onlineFailed,
+        onlineTimeout,
         standalonePlay,
         standalonePause,
         tipStandalone

@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.9.2";
+    const char* const kVersion = "1.9.3";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -2571,6 +2571,14 @@ void LyricSyncEditor::paintSearch (juce::Graphics& g, juce::Rectangle<float> pan
         drawText (g, preview.reduced (10.0f, 4.0f), text, 11.0f, palette.dim, false,
                   -1, {}, 1.0f, juce::Justification::centredLeft);
     }
+    else if (searchDiag.isNotEmpty() && ! searchBusy)
+    {
+        // 搜不到时把每一步的 HTTP 状态摆出来，方便判断是网络还是接口问题
+        drawText (g, preview.reduced (10.0f, 4.0f),
+                  tr (Lang::TextId::onlineDiag) + "  " + searchDiag,
+                  10.0f, palette.warn, false, -1, {}, 1.0f,
+                  juce::Justification::centredLeft);
+    }
 
     drawText (g, juce::Rectangle<float> (x, panel.getY() + 478.0f, w, 18.0f),
               tr (Lang::TextId::onlineSelectHint), 10.5f, palette.faint, false,
@@ -2783,6 +2791,8 @@ void LyricSyncEditor::timerCallback()
     const double dt  = lastTickMs <= 0.0 ? 0.0
                      : juce::jlimit (0.0, 0.25, (now - lastTickMs) / 1000.0);
     lastTickMs = now;
+
+    watchSearchTimeout (now);
 
     auto updates = processor.timeUpdates.load();
     if (updates != lastTimeUpdates)
@@ -3751,6 +3761,8 @@ void LyricSyncEditor::showSearch (bool shouldShow)
         settingsOpen = false;
         aboutOpen = false;
         searchStatus = tr (Lang::TextId::onlineStartHint);
+        searchDiag = {};
+        searchStartedMs = 0.0;
     }
 
     updateVisibility();
@@ -3794,31 +3806,69 @@ void LyricSyncEditor::startSearch()
                        ? static_cast<int> (audioTotalSeconds) : 0;
     const auto url = customSearchUrl;
 
+    ++searchToken;
+    const int token = searchToken;
+
     searchBusy = true;
+    searchStartedMs = juce::Time::getMillisecondCounterHiRes();
     searchResults.clear();
     searchSel = -1;
     searchScroll = 0;
+    searchDiag = {};
     searchStatus = tr (Lang::TextId::onlineSearching);
     repaint();
 
-    // 网络请求全部在后台线程，回调只带结果数据，不触碰已销毁的编辑器
+    // 网络请求全部在后台线程，回调只带结果数据，不触碰已销毁的编辑器。
+    // 整段 try/catch：任何异常都要回一次结果，否则 searchBusy 会永久卡死。
     juce::Component::SafePointer<LyricSyncEditor> safe (this);
 
-    std::thread ([safe, title, artist, duration, url]()
+    std::thread ([safe, title, artist, duration, url, token]()
     {
-        auto outcome = OnlineLyrics::search (title, artist, duration, url);
+        OnlineLyrics::Outcome outcome;
 
-        juce::MessageManager::callAsync ([safe, outcome]()
+        try
+        {
+            outcome = OnlineLyrics::search (title, artist, duration, url);
+        }
+        catch (...)
+        {
+            outcome.error = "exception";
+            outcome.detail = "exception";
+        }
+
+        juce::MessageManager::callAsync ([safe, outcome, token]()
         {
             if (auto* ed = safe.getComponent())
-                ed->searchFinished (outcome);
+                ed->searchFinished (outcome, token);
         });
     }).detach();
 }
 
-void LyricSyncEditor::searchFinished (OnlineLyrics::Outcome outcome)
+/** 连接超时管不住"连上后不返回数据"，这里给整次请求兜一个总时限。 */
+void LyricSyncEditor::watchSearchTimeout (double nowMs)
 {
+    if (! searchBusy || searchStartedMs <= 0.0)
+        return;
+
+    if (nowMs - searchStartedMs < 40000.0)
+        return;
+
+    ++searchToken;                 // 让迟到的回调作废，不会覆盖下一次搜索
     searchBusy = false;
+    searchStartedMs = 0.0;
+    searchStatus = tr (Lang::TextId::onlineTimeout);
+    repaint();
+}
+
+void LyricSyncEditor::searchFinished (OnlineLyrics::Outcome outcome, int token)
+{
+    // 看门狗已经判超时、或用户又发起了新搜索：这份过期结果直接丢掉
+    if (token != searchToken)
+        return;
+
+    searchBusy = false;
+    searchStartedMs = 0.0;
+    searchDiag = outcome.detail;
     searchResults = std::move (outcome.results);
     searchSel = searchResults.empty() ? -1 : 0;
     searchScroll = 0;
@@ -3836,6 +3886,10 @@ void LyricSyncEditor::searchFinished (OnlineLyrics::Outcome outcome)
     {
         searchStatus = tr (Lang::TextId::onlineEnterTitle);
     }
+    else if (outcome.error == "exception")
+    {
+        searchStatus = tr (Lang::TextId::onlineFailed);
+    }
     else
     {
         searchStatus = tr (Lang::TextId::onlineNotFound);
@@ -3851,7 +3905,11 @@ void LyricSyncEditor::loadSelectedResult()
 
     const auto result = searchResults[(size_t) searchSel];
 
+    ++searchToken;
+    const int token = searchToken;
+
     searchBusy = true;
+    searchStartedMs = juce::Time::getMillisecondCounterHiRes();
     searchStatus = tr (Lang::TextId::onlineLoading);
     repaint();
 
@@ -3859,20 +3917,32 @@ void LyricSyncEditor::loadSelectedResult()
 
     juce::Component::SafePointer<LyricSyncEditor> safe (this);
 
-    std::thread ([safe, result, simplify]()
+    std::thread ([safe, result, simplify, token]()
     {
-        const auto lrc = OnlineLyrics::download (result, simplify);
+        juce::String lrc;
 
-        juce::MessageManager::callAsync ([safe, lrc, label = result.title]()
+        try
+        {
+            lrc = OnlineLyrics::download (result, simplify);
+        }
+        catch (...)
+        {
+            lrc = {};
+        }
+
+        juce::MessageManager::callAsync ([safe, lrc, label = result.title, token]()
         {
             if (auto* ed = safe.getComponent())
-                ed->downloadFinished (lrc, label);
+                ed->downloadFinished (lrc, label, token);
         });
     }).detach();
 }
 
-void LyricSyncEditor::downloadFinished (juce::String lrc, juce::String label)
+void LyricSyncEditor::downloadFinished (juce::String lrc, juce::String label, int token)
 {
+    if (token != searchToken)
+        return;
+
     searchBusy = false;
 
     if (lrc.trim().isEmpty())
@@ -3909,7 +3979,16 @@ void LyricSyncEditor::startLxFetch()
 
     std::thread ([safe, url, simplify]()
     {
-        const auto result = OnlineLyrics::fetchFromLx (url, simplify);
+        OnlineLyrics::LxResult result;
+
+        try
+        {
+            result = OnlineLyrics::fetchFromLx (url, simplify);
+        }
+        catch (...)
+        {
+            result.error = "connect";
+        }
 
         juce::MessageManager::callAsync ([safe, result]()
         {

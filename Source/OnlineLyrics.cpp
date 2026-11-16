@@ -77,7 +77,13 @@ namespace
 
     bool usable (const juce::String& body, int status)
     {
-        return body.isNotEmpty() && (status == 200 || status == 0);
+        // 有些节点会返回 206 之类，2xx 都当成功；status 0 表示平台没填，也放行
+        return body.isNotEmpty() && (status == 0 || (status >= 200 && status < 300));
+    }
+
+    juce::String diag (const char* tag, int status, int items)
+    {
+        return juce::String (tag) + "=" + juce::String (status) + "/" + juce::String (items) + " ";
     }
 
     juce::var field (const juce::var& obj, const char* name)
@@ -300,7 +306,7 @@ namespace
     }
 
     std::vector<Result> searchKugouSongs (juce::String title, juce::String artist,
-                                          int targetSec)
+                                          int targetSec, juce::String& diag)
     {
         // 用户常把「歌名-歌手」一起粘进歌名框，这里拆开
         if (artist.isEmpty())
@@ -319,11 +325,14 @@ namespace
                                 + "&page=1&pagesize=12&showtype=1";
 
         // 该 CDN 的 HTTPS 证书在部分网络下 hostname 不匹配，明文 HTTP 优先
+        // mobiles.kugou.com 的 HTTPS 证书正常，优先用它；
+        // mobilecdn 两个域名 HTTPS 证书 hostname 不匹配，只能走明文，放后面兜底。
         static const char* hosts[] =
         {
+            "https://mobiles.kugou.com",
             "http://mobilecdn.kugou.com",
-            "https://mobilecdn.kugou.com",
-            "http://mobilecdnbj.kugou.com"
+            "http://mobilecdnbj.kugou.com",
+            "http://mobiles.kugou.com"
         };
 
         std::vector<Result> out;
@@ -335,7 +344,10 @@ namespace
                                        status, 5000);
 
             if (! usable (body, status))
+            {
+                diag << "song" << status << " ";
                 continue;
+            }
 
             const auto root = juce::JSON::parse (body);
             const auto data = field (root, "data");
@@ -343,7 +355,12 @@ namespace
             const auto* arr = info.getArray();
 
             if (arr == nullptr)
+            {
+                diag << "songBADJSON ";
                 continue;
+            }
+
+            diag << "song" << status << "/" << static_cast<int> (arr->size()) << " ";
 
             for (const auto& v : *arr)
             {
@@ -401,7 +418,7 @@ namespace
     /** 旧的关键词歌词搜索（歌曲库不可用时的兜底，歌手信息不可靠）。 */
     std::vector<Result> searchKugouByKeyword (const juce::String& title,
                                               const juce::String& artist,
-                                              int targetSec)
+                                              int targetSec, juce::String& diag)
     {
         std::vector<Result> all;
         juce::StringArray keywords;
@@ -419,14 +436,22 @@ namespace
                 + urlEncode (kw), kKugouHeaders, status, 6000);
 
             if (! usable (body, status))
+            {
+                diag << "kw" << status << " ";
                 continue;
+            }
 
             const auto root = juce::JSON::parse (body);
             const auto candidates = field (root, "candidates");
             const auto* arr = candidates.getArray();
 
             if (arr == nullptr)
+            {
+                diag << "kwBADJSON ";
                 continue;
+            }
+
+            diag << "kw" << status << "/" << static_cast<int> (arr->size()) << " ";
 
             for (const auto& v : *arr)
             {
@@ -665,6 +690,8 @@ Outcome search (juce::String title, juce::String artist,
         return outcome;
     }
 
+    juce::String diag;
+
     //---- 1. 自定义服务（填了就优先，失败再自动回退） -------------------------
     if (customUrl.trim().isNotEmpty())
     {
@@ -680,41 +707,60 @@ Outcome search (juce::String title, juce::String artist,
             {
                 outcome.results = std::move (found);
                 outcome.via = "Custom";
+                outcome.detail = "custom" + juce::String (status);
                 return outcome;
             }
         }
+
+        diag << "custom" << status << " ";
     }
 
     //---- 2. 酷狗歌曲库（带准确歌手与 hash，避免同名串歌） -------------------
     {
-        auto found = searchKugouSongs (title, artist, durationSec);
+        auto found = searchKugouSongs (title, artist, durationSec, diag);
 
         if (! found.empty())
         {
             outcome.results = std::move (found);
             outcome.via = "Kugou";
+            outcome.detail = diag.trim();
             return outcome;
         }
     }
 
     //---- 3. 酷狗旧关键词接口（歌曲库不可用时的兜底） -------------------------
     {
-        auto found = searchKugouByKeyword (title, artist, durationSec);
+        auto found = searchKugouByKeyword (title, artist, durationSec, diag);
 
         if (! found.empty())
         {
             outcome.results = std::move (found);
             outcome.via = "Kugou (keyword)";
+            outcome.detail = diag.trim();
             return outcome;
         }
     }
 
     //---- 4. LRCLIB 兜底 ------------------------------------------------------
     {
-        const auto q = artist.isNotEmpty() ? title + " " + artist : title;
         int status = 0;
-        const auto body = httpGet ("https://lrclib.net/api/search?q=" + urlEncode (q),
-                                   kLrclibHeaders, status);
+        juce::String body;
+
+        // 有歌手时先用精确参数，命中率比模糊 q= 高
+        if (artist.isNotEmpty())
+        {
+            body = httpGet ("https://lrclib.net/api/search?track_name=" + urlEncode (title)
+                            + "&artist_name=" + urlEncode (artist),
+                            kLrclibHeaders, status);
+        }
+
+        if (! usable (body, status))
+        {
+            status = 0;
+            const auto q = artist.isNotEmpty() ? title + " " + artist : title;
+            body = httpGet ("https://lrclib.net/api/search?q=" + urlEncode (q),
+                            kLrclibHeaders, status);
+        }
 
         if (usable (body, status))
         {
@@ -725,6 +771,8 @@ Outcome search (juce::String title, juce::String artist,
                 [] (const Result& a, const Result& b)
                 { return a.lineCount > b.lineCount; });
 
+            diag << "lrc" << status << "/" << static_cast<int> (found.size()) << " ";
+
             if (! found.empty())
             {
                 if (found.size() > 20)
@@ -732,12 +780,18 @@ Outcome search (juce::String title, juce::String artist,
 
                 outcome.results = std::move (found);
                 outcome.via = "LRCLIB";
+                outcome.detail = diag.trim();
                 return outcome;
             }
+        }
+        else
+        {
+            diag << "lrc" << status << " ";
         }
     }
 
     outcome.error = "notfound";
+    outcome.detail = diag.trim();
     return outcome;
 }
 

@@ -191,9 +191,10 @@ private:
     //---- 在线搜歌词 ---------------------------------------------------------
     void showSearch (bool show);
     void startSearch();
-    void searchFinished (OnlineLyrics::Outcome outcome);
+    void searchFinished (OnlineLyrics::Outcome outcome, int token);
     void loadSelectedResult();
-    void downloadFinished (juce::String lrc, juce::String label);
+    void downloadFinished (juce::String lrc, juce::String label, int token);
+    void watchSearchTimeout (double nowMs);
     void startLxFetch();
     void lxFinished (OnlineLyrics::LxResult result);
     void commitCustomUrl();
@@ -353,6 +354,9 @@ private:
     std::vector<OnlineLyrics::Result> searchResults;
     int    searchSel    = -1;
     int    searchScroll = 0;
+    juce::String searchDiag;                 // 失败时显示给用户的诊断串
+    double searchStartedMs = 0.0;            // 看门狗：请求卡住时自动解锁
+    int    searchToken = 0;                  // 过期回调不再生效
 
     bool   showHints       = true;         // 左下角轮播提示开关
     int    hintIndex       = 0;

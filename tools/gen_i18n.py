@@ -372,6 +372,9 @@ TABLE = [
     ("onlineSimplifyOff","繁转简：关", "To Simplified: OFF"),
     ("onlineSimplifyHint","在线获取的歌词自动把繁体转成简体；想保留粤语原词可关掉",
                        "Automatically convert traditional Chinese to simplified; turn off to keep original Cantonese text"),
+    ("onlineDiag",      "诊断", "Diag"),
+    ("onlineFailed",    "请求失败，请检查网络或稍后重试", "Request failed; check your connection"),
+    ("onlineTimeout",   "请求超时，已自动解锁，请再点一次「搜索」", "Timed out; press Search again"),
 
     #--- 独立版走带 -----------------------------------------------------------
     ("standalonePlay",  "播放", "Play"),

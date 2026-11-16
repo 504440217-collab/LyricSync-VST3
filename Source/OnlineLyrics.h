@@ -38,6 +38,7 @@ namespace OnlineLyrics
         std::vector<Result> results;
         juce::String via;             // 实际命中的来源
         juce::String error;           // "empty" / "notfound" / 空 = 成功
+        juce::String detail;          // 诊断信息：每一步的 HTTP 状态与结果数
     };
 
     struct LxResult
