@@ -153,6 +153,15 @@ private:
     void paintAbout    (juce::Graphics& g, juce::Rectangle<float> panel);
     void paintSearch   (juce::Graphics& g, juce::Rectangle<float> panel);
     void paintStandaloneTransport (juce::Graphics& g);
+
+    //---- 右下角读数条（走带） -------------------------------------------------
+    void paintHud (juce::Graphics& g);
+    void hudSeekTo (juce::Point<float> logical);
+    juce::Rectangle<float> hudBounds() const;
+    juce::Rectangle<float> hudPlayRect() const;
+    juce::Rectangle<float> hudBarRect() const;
+    juce::Rectangle<float> hudTempoRect() const;
+    juce::Rectangle<float> hudUndoRect() const;
     void paintInfoLine (juce::Graphics& g);
     void drawText    (juce::Graphics& g, juce::Rectangle<float> area,
                       const juce::String& text, float size, juce::Colour colour,
@@ -344,6 +353,12 @@ private:
     //---- Standalone 独立版走带 ----------------------------------------------
     bool   standaloneMode = false;          // 运行时检测：只有独立版显示走带控件
     bool   standaloneSeekDragging = false;
+
+    // 走带读数条状态
+    bool   hudDrag        = false;    // 正在拖进度条
+    double hudHoldUntilMs = 0.0;      // 预览定位保持到什么时候
+    bool   offsetScrub    = false;    // 正在拖「偏移」数值
+    double offsetScrubMs  = 0.0;
     juce::Rectangle<float> standaloneSeekBar;  // 逻辑坐标，自绘进度条热区
 
     // 在线搜歌词的后台线程池。用池而不是 std::thread::detach()：

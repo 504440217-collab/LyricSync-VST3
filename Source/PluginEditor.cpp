@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.9.9";
+    const char* const kVersion = "1.9.10";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -1086,6 +1086,8 @@ void LyricSyncEditor::refreshLookAndFeel()
 
     offsetLabel.setColour (juce::Label::textColourId, palette.dim);
     offsetLabel.setColour (juce::Label::backgroundColourId, palette.card);
+    offsetLabel.addMouseListener (this, false);
+    offsetLabel.setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
     hintLabel.setColour (juce::Label::textColourId, palette.faint);
     fileLabel.setColour (juce::Label::textColourId, palette.dim);
     fontLabel.setColour (juce::Label::textColourId, palette.faint);
@@ -1143,6 +1145,11 @@ void LyricSyncEditor::updateVisibility()
                      static_cast<juce::Component*> (&gearButton),
                      static_cast<juce::Component*> (&onlineLyricsButton) })
         c->setVisible (normal);
+
+    // 右下角读数条接管了这些内容：重测音频废弃；测速 / 撤销 / 音频长度都挪进读数条
+    measureButton.setVisible (false);
+    retempoButton.setVisible (false);
+    audioLabel   .setVisible (false);
 
     // 已下线的「示例歌词」与「手动预览」：一律不显示
     demoButton      .setVisible (false);
@@ -1676,6 +1683,11 @@ void LyricSyncEditor::paint (juce::Graphics& g)
 
     if (standaloneMode)
         paintStandaloneTransport (g);
+
+    // 走带读数条：编辑 / 打轴 / 弹面板时让位，其余时候常驻
+    if (! zenMode && ! editing && ! tapMode && ! annotateMode
+        && ! settingsOpen && ! aboutOpen && ! searchOpen)
+        paintHud (g);
 
     if (settingsOpen)
         paintSettings (g, settingsPanelArea());
@@ -2448,27 +2460,9 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
 }
 
 //==============================================================================
-void LyricSyncEditor::paintInfoLine (juce::Graphics& g)
+void LyricSyncEditor::paintInfoLine (juce::Graphics&)
 {
-    // 右下角只显示加粗的测速结果；时间码在右上角已经有了，
-    // 这里右侧的位置留给「重新测速」按钮。
-    const bool v = (orientation == Orientation::vertical);
-    const auto area = v ? juce::Rectangle<float> (22.0f, 786.0f,
-                                                  baseW() - 44.0f, 22.0f)
-                        : juce::Rectangle<float> (452.0f, 518.0f, 380.0f, 22.0f);
-
-    const juce::String bpmText = tr (Lang::TextId::bpmPrefix)
-                               + (detectedBpm > 0.0 ? juce::String (detectedBpm, 1)
-                                                    : juce::String ("--"));
-
-    juce::AttributedString s;
-    s.setJustification (juce::Justification::centredRight);
-    s.append (bpmText, uiFont (14.0f, true));
-    // 与「音频 0:13」「字号」等读数统一用中性文字色，不再跟强调色变成青绿
-    s.setColour (juce::Range<int> (0, bpmText.length()), palette.dim);
-
-    const juce::Graphics::ScopedSaveState state (g);
-    s.draw (g, area);
+    // BPM / 时间码 / 测速已全部收进右下角的读数条（paintHud），这里不再重复绘制。
 }
 
 void LyricSyncEditor::paintSettings (juce::Graphics& g, juce::Rectangle<float> panel)
@@ -2700,6 +2694,215 @@ void LyricSyncEditor::seekStandaloneAt (juce::Point<float> logical)
 }
 
 /** 独立版专属：跟随内置时钟的播放进度条（可点、可拖）。 */
+//==============================================================================
+juce::Rectangle<float> LyricSyncEditor::hudBounds() const
+{
+    const auto s = stageArea();
+
+    return { s.getX() + 18.0f, s.getBottom() - 30.0f,
+             s.getWidth() - 36.0f, 24.0f };
+}
+
+juce::Rectangle<float> LyricSyncEditor::hudPlayRect() const
+{
+    const auto r = hudBounds();
+    return { r.getX(), r.getY(), 24.0f, 24.0f };
+}
+
+juce::Rectangle<float> LyricSyncEditor::hudUndoRect() const
+{
+    const auto r = hudBounds();
+    return { r.getRight() - 24.0f, r.getY(), 24.0f, 24.0f };
+}
+
+juce::Rectangle<float> LyricSyncEditor::hudTempoRect() const
+{
+    const auto r = hudBounds();
+    return { r.getRight() - 24.0f - 8.0f - 26.0f, r.getY(), 26.0f, 24.0f };
+}
+
+juce::Rectangle<float> LyricSyncEditor::hudBarRect() const
+{
+    const auto r = hudBounds();
+
+    // 右侧依次让出：撤销 24 + 8、测速 26 + 8、BPM 78 + 8、分隔 1 + 8、时间码 104
+    const float rightEdge = r.getRight() - 24.0f - 8.0f - 26.0f - 8.0f
+                          - 78.0f - 8.0f - 1.0f - 8.0f - 104.0f;
+
+    const float left = hudPlayRect().getRight() + 10.0f;
+
+    return { left, r.getCentreY() - 1.5f,
+             juce::jmax (40.0f, rightEdge - 10.0f - left), 3.0f };
+}
+
+/** 拖进度条：独立版真的定位；VST3 里只挪歌词（方案 A），2 秒后回到跟随宿主。 */
+void LyricSyncEditor::hudSeekTo (juce::Point<float> logical)
+{
+    const auto bar = hudBarRect();
+
+    if (bar.getWidth() <= 1.0f)
+        return;
+
+    const double t01 = juce::jlimit (0.0, 1.0,
+        static_cast<double> ((logical.x - bar.getX()) / bar.getWidth()));
+
+    const auto range = audioRange();
+    const double target = range.getStart() + t01 * juce::jmax (1.0, range.getLength());
+
+    if (standaloneMode)
+    {
+        previewOffset = 0.0;
+        processor.seekStandalone (juce::jmax (0.0, target - offsetMs / 1000.0));
+    }
+    else
+    {
+        // displayTime = 播放位置 + 偏移 + 预览偏移
+        previewOffset = target - (processor.positionSeconds.load() + offsetMs / 1000.0);
+        hudHoldUntilMs = juce::Time::getMillisecondCounterHiRes() + 2000.0;
+    }
+
+    repaint();
+}
+
+void LyricSyncEditor::paintHud (juce::Graphics& g)
+{
+    const auto r = hudBounds();
+
+    if (r.getWidth() < 220.0f)
+        return;
+
+    const bool playing = standaloneMode ? processor.standalonePlaying.load()
+                                        : processor.isPlaying.load();
+
+    //---- 播放 / 暂停 ----
+    {
+        const auto b = hudPlayRect();
+
+        g.setColour (palette.text.withAlpha (0.06f));
+        g.fillRoundedRectangle (b, 6.0f);
+
+        g.setColour (palette.text.withAlpha (0.85f));
+
+        if (playing)
+        {
+            g.fillRoundedRectangle (b.getCentreX() - 4.6f, b.getY() + 7.0f, 2.6f, 10.0f, 1.0f);
+            g.fillRoundedRectangle (b.getCentreX() + 2.0f, b.getY() + 7.0f, 2.6f, 10.0f, 1.0f);
+        }
+        else
+        {
+            juce::Path tri;
+            tri.addTriangle (b.getCentreX() - 3.0f, b.getY() + 6.5f,
+                             b.getCentreX() - 3.0f, b.getBottom() - 6.5f,
+                             b.getCentreX() + 5.4f, b.getCentreY());
+            g.fillPath (tri);
+        }
+    }
+
+    //---- 进度条 ----
+    const auto bar = hudBarRect();
+    const auto range = audioRange();
+    const float t01 = static_cast<float> (juce::jlimit (0.0, 1.0,
+        (displayTime - range.getStart()) / juce::jmax (1.0, range.getLength())));
+
+    g.setColour (palette.track.withAlpha (0.85f));
+    g.fillRoundedRectangle (bar, 1.5f);
+
+    const float filled = bar.getWidth() * t01;
+
+    if (filled > 0.5f)
+    {
+        g.setColour (palette.accent.withAlpha (hudDrag ? 1.0f : 0.88f));
+        g.fillRoundedRectangle (bar.withWidth (filled), 1.5f);
+    }
+
+    {
+        const float cx = bar.getX() + juce::jlimit (0.0f, bar.getWidth(), filled);
+        g.setColour (palette.text);
+        g.fillEllipse (cx - 5.0f, bar.getCentreY() - 5.0f, 10.0f, 10.0f);
+
+        g.setColour (palette.bgTop.withAlpha (0.55f));
+        g.drawEllipse (cx - 5.0f, bar.getCentreY() - 5.0f, 10.0f, 10.0f, 1.0f);
+    }
+
+    //---- 时间码（预览定位时前面点一个小圆点提示）----
+    const float gap = 8.0f;
+    const auto tcRect = juce::Rectangle<float> (bar.getRight() + 10.0f, r.getY(),
+                                                104.0f, r.getHeight());
+
+    if (std::abs (previewOffset) > 0.02)
+    {
+        g.setColour (palette.accent);
+        g.fillEllipse (tcRect.getX() - 7.0f, r.getCentreY() - 2.0f, 4.0f, 4.0f);
+    }
+
+    drawText (g, tcRect,
+              timecodeText (displayTime) + " / " + timecodeText (range.getEnd()),
+              11.0f, palette.dim, false, -1.0f, {}, 1.0f, juce::Justification::centredLeft);
+
+    //---- 分隔线 ----
+    const float sepX = tcRect.getRight() + gap;
+
+    g.setColour (palette.panelEdge.withAlpha (0.55f));
+    g.drawLine (sepX, r.getY() + 7.0f, sepX, r.getBottom() - 7.0f, 1.0f);
+
+    //---- BPM ----
+    const auto bpmRect = juce::Rectangle<float> (sepX + gap, r.getY(), 78.0f, r.getHeight());
+    const juce::String bpmText = (detectedBpm > 0.0 ? juce::String (detectedBpm, 1)
+                                                    : juce::String ("--"))
+                               + " BPM";
+
+    drawText (g, bpmRect, bpmText, 11.0f, palette.dim, false, -1.0f, {}, 1.0f,
+              juce::Justification::centredLeft);
+
+    //---- 测速（循环箭头）----
+    {
+        const auto b = hudTempoRect();
+
+        g.setColour (palette.text.withAlpha (0.05f));
+        g.fillRoundedRectangle (b, 6.0f);
+
+        const float cx = b.getCentreX(), cy = b.getCentreY();
+
+        juce::Path arc;
+        arc.addCentredArc (cx, cy, 5.0f, 5.0f, 0.0f,
+                           juce::MathConstants<float>::pi * 0.30f,
+                           juce::MathConstants<float>::pi * 1.80f, true);
+
+        g.setColour (palette.dim);
+        g.strokePath (arc, juce::PathStrokeType (1.3f));
+
+        juce::Path head;
+        head.addTriangle (cx - 1.4f, cy - 6.6f,
+                          cx + 3.6f, cy - 4.4f,
+                          cx - 0.6f, cy - 1.6f);
+        g.fillPath (head);
+    }
+
+    //---- 撤销（↺）----
+    {
+        const auto b = hudUndoRect();
+
+        g.setColour (palette.text.withAlpha (0.05f));
+        g.fillRoundedRectangle (b, 6.0f);
+
+        const float cx = b.getCentreX(), cy = b.getCentreY();
+
+        juce::Path arc;
+        arc.addCentredArc (cx, cy, 4.6f, 4.6f, 0.0f,
+                           juce::MathConstants<float>::pi * 0.95f,
+                           juce::MathConstants<float>::pi * 1.95f, true);
+
+        g.setColour (palette.dim);
+        g.strokePath (arc, juce::PathStrokeType (1.3f));
+
+        juce::Path head;
+        head.addTriangle (cx - 6.4f, cy - 1.0f,
+                          cx - 1.6f, cy - 1.2f,
+                          cx - 4.2f, cy - 5.4f);
+        g.fillPath (head);
+    }
+}
+
 void LyricSyncEditor::paintStandaloneTransport (juce::Graphics& g)
 {
     if (! standaloneMode || zenMode || editing || tapMode || standaloneSeekBar.isEmpty())
@@ -2892,7 +3095,9 @@ void LyricSyncEditor::timerCallback()
     const auto range = audioRange();
 
     // 一开始播放就把手动预览偏移清掉，歌词立刻回到播放头位置
-    if (! previewDragging && previewOffset != 0.0 && processor.isPlaying.load())
+    if (! previewDragging && ! hudDrag && previewOffset != 0.0
+        && processor.isPlaying.load()
+        && juce::Time::getMillisecondCounterHiRes() > hudHoldUntilMs)
         previewOffset = 0.0;
 
     if (demoMode)
@@ -3354,6 +3559,52 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    // 按住「偏移」数值框拖动：每 10 逻辑像素走 100 ms
+    if (e.eventComponent == &offsetLabel && ! editing && ! tapMode)
+    {
+        offsetHistory.push_back (offsetMs);
+
+        if (offsetHistory.size() > 60)
+            offsetHistory.erase (offsetHistory.begin());
+
+        offsetScrub   = true;
+        offsetScrubMs = offsetMs;
+        return;
+    }
+
+    // 右下角读数条：播放/暂停、测速、撤销、拖动定位
+    if (! zenMode && ! editing && ! tapMode && ! annotateMode
+        && ! settingsOpen && ! aboutOpen && ! searchOpen
+        && e.eventComponent == this)
+    {
+        const auto p = toLogicalPoint (e.position);
+
+        if (hudPlayRect().expanded (3.0f).contains (p))
+        {
+            toggleHostTransport();
+            return;
+        }
+
+        if (hudTempoRect().expanded (3.0f).contains (p))
+        {
+            retempoButton.triggerClick();
+            return;
+        }
+
+        if (hudUndoRect().expanded (3.0f).contains (p))
+        {
+            undoSetStartButton.triggerClick();
+            return;
+        }
+
+        if (hudBarRect().expanded (0.0f, 9.0f).contains (p))
+        {
+            hudDrag = true;
+            hudSeekTo (p);
+            return;
+        }
+    }
+
     if (aboutOpen)
     {
         if (! aboutPanelArea().contains (toLogical (e.position)))
@@ -3532,6 +3783,22 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 
 void LyricSyncEditor::mouseDrag (const juce::MouseEvent& e)
 {
+    if (hudDrag && e.eventComponent == this)
+    {
+        hudSeekTo (toLogicalPoint (e.position));
+        return;
+    }
+
+    if (offsetScrub)
+    {
+        const double dx = e.getDistanceFromDragStartX() / juce::jmax (0.01f, uiScaleX);
+        const double steps = std::round (dx / 10.0);          // 10px = 一格 = 0.1 秒
+        offsetMs = juce::jlimit (-1800000.0, 1800000.0, offsetScrubMs + steps * 100.0);
+        processor.setSetting (Settings::offsetMs, offsetMs);
+        repaint();
+        return;
+    }
+
     if (standaloneSeekDragging && e.eventComponent == this)
     {
         seekStandaloneAt (toLogicalPoint (e.position));
@@ -3675,6 +3942,20 @@ void LyricSyncEditor::mouseWheelMove (const juce::MouseEvent& e,
 
 void LyricSyncEditor::mouseUp (const juce::MouseEvent&)
 {
+    if (hudDrag)
+    {
+        hudDrag = false;
+        // 松手后先保持 2 秒预览，方便你看清楚跳到哪一句，再回到跟随宿主
+        hudHoldUntilMs = juce::Time::getMillisecondCounterHiRes() + 2000.0;
+        repaint();
+    }
+
+    if (offsetScrub)
+    {
+        offsetScrub = false;
+        repaint();
+    }
+
     if (standaloneSeekDragging)
     {
         standaloneSeekDragging = false;
@@ -5286,11 +5567,16 @@ void LyricSyncEditor::closeTapRowEditing()
 
 void LyricSyncEditor::toggleHostTransport()
 {
-    if (! tapMode)
+    // 独立版：直接控内置时钟
+    if (standaloneMode)
+    {
+        processor.setStandalonePlaying (! processor.standalonePlaying.load());
+        repaint();
         return;
+    }
 
-    // 手动预览模式下，插件自己就能走带
-    if (demoMode)
+    // 打轴界面里的旧路径保留（此时 demoMode 恒为 false）
+    if (tapMode && demoMode)
     {
         toggleTapPause();
         return;
