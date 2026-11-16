@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.9.7";
+    const char* const kVersion = "1.9.8";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -1857,11 +1857,12 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
 
     const auto currentTint = lyricColour();
 
-    //---- 前奏倒数：首个正式唱词前 4 拍，灰色半透明大数字压在歌词文字下层 -----
-    //  BPM 优先用自动测速结果，测不出来就用宿主/默认速度；不需要联网也不需要 AI：
-    //  倒数起点 = 首个唱词时间 - 4 * 每拍秒数，纯算术，零延迟。
+    //---- 前奏倒数：首个正式唱词前 4 拍，4 个圆点按拍点亮 --------------------
+    //  圆点直径跟歌词正文一样大（v1.9.8），比原来的小点更醒目。
+    //  BPM 优先用自动测速结果，测不出来就用宿主/默认速度；纯算术，零延迟。
     const int vocalStart = firstVocalLineIndex();
-    int countInDigit = 0;
+    int countInLit = -1;          // >=0 表示正在倒数，值 = 已点亮的点数
+    double countInBpm = 0.0;
 
     if (! doc.isEmpty() && vocalStart >= 0 && vocalStart < doc.size())
     {
@@ -1873,21 +1874,31 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
         {
             const double beatsLeft = (vocalTime - displayTime) / spb;
 
-            if (beatsLeft > 0.0 && beatsLeft <= 4.0)
+            if (beatsLeft > -0.30 && beatsLeft <= 4.0)
             {
-                countInDigit = juce::jlimit (1, 4,
-                    static_cast<int> (std::ceil (beatsLeft)));
+                countInLit = juce::jlimit (0, 4,
+                    4 - static_cast<int> (std::ceil (juce::jmax (0.0, beatsLeft))) + 1);
+                countInBpm = bpmNow;
 
-                const float numSize = juce::jmin (area.getWidth() * 0.30f,
-                                                  area.getHeight() * 0.38f);
+                const float r    = 17.0f * widthScale;    // 半径 17 → 直径 34，与正文字号一致
+                const float gap  = 52.0f * widthScale;
+                const float dotY = centreY + 4.0f;
 
-                drawText (g, juce::Rectangle<float> (area.getX(),
-                                                     centreY - numSize * 0.72f,
-                                                     area.getWidth(),
-                                                     numSize * 1.44f),
-                          juce::String (countInDigit), numSize,
-                          palette.text.withAlpha (countInDigit == 1 ? 0.15f : 0.09f),
-                          true, -1.0f, {}, 1.0f, juce::Justification::centred);
+                for (int i = 0; i < 4; ++i)
+                {
+                    const float cx = area.getCentreX()
+                                   + (static_cast<float> (i) - 1.5f) * gap;
+                    const bool on = i < countInLit;
+
+                    g.setColour (on ? currentTint : palette.track);
+                    g.fillEllipse (cx - r, dotY - r, r * 2.0f, r * 2.0f);
+                }
+
+                drawText (g, juce::Rectangle<float> (area.getX() + 60.0f,
+                                                     dotY + r + 12.0f,
+                                                     area.getWidth() - 120.0f, 18.0f),
+                          tr (Lang::TextId::bpmPrefix) + juce::String (countInBpm, 1),
+                          11.0f * widthScale, palette.faint, false);
             }
         }
     }
@@ -2039,24 +2050,30 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
                   juce::Justification::centredRight);
     }
 
-    if (! hasCurrent && countInDigit == 0)
+    if (! hasCurrent)
     {
         // 正式唱词的时间（可能被前面的作词/作曲信息推后）
         const double vocalTime = (vocalStart >= 0 && vocalStart < doc.size())
                                ? doc.line (vocalStart).time
                                : (doc.isEmpty() ? 0.0 : doc.line (0).time);
 
-        drawText (g, juce::Rectangle<float> (area.getX() + 60.0f, centreY - 13.0f,
+        // 倒数时「前奏」字样上移，给下面的 4 个圆点让位
+        const float introY = (countInLit >= 0) ? centreY - 62.0f : centreY - 13.0f;
+
+        drawText (g, juce::Rectangle<float> (area.getX() + 60.0f, introY,
                                              area.getWidth() - 120.0f, 26.0f),
                   tr (Lang::TextId::intro), 17.0f * widthScale,
                   palette.faint, false);
 
-        drawText (g, juce::Rectangle<float> (area.getX() + 60.0f, centreY + 17.0f,
-                                             area.getWidth() - 120.0f, 20.0f),
-                  tr (Lang::TextId::nextLineIn)
-                    + juce::String (juce::jmax (0.0, vocalTime - displayTime), 1)
-                    + tr (Lang::TextId::secondsSuffix),
-                  11.5f * widthScale, palette.faint, false);
+        if (countInLit < 0)
+        {
+            drawText (g, juce::Rectangle<float> (area.getX() + 60.0f, centreY + 17.0f,
+                                                 area.getWidth() - 120.0f, 20.0f),
+                      tr (Lang::TextId::nextLineIn)
+                        + juce::String (juce::jmax (0.0, vocalTime - displayTime), 1)
+                        + tr (Lang::TextId::secondsSuffix),
+                      11.5f * widthScale, palette.faint, false);
+        }
     }
 }
 
