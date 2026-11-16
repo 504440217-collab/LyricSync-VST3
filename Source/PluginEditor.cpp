@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.0.4";
+    const char* const kVersion = "2.0.5";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -546,6 +546,34 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
         return;
     }
 
+    if (icon == Icon::undo)
+    {
+        // 撤销：一圈带缺口的弧 + 顶部小箭头（纯 Path，不依赖字体里有没有 ↺）
+        const float cx = outer.getCentreX();
+        const float cy = outer.getCentreY();
+        const float rr = juce::jmin (outer.getWidth(), outer.getHeight()) * 0.5f - 6.0f;
+
+        juce::Path arc;
+        arc.addCentredArc (cx, cy, rr, rr, 0.0f,
+                           juce::MathConstants<float>::pi * -0.34f,
+                           juce::MathConstants<float>::pi * 1.46f, true);
+
+        g.setColour (colour);
+        g.strokePath (arc, juce::PathStrokeType (1.4f,
+                        juce::PathStrokeType::curved,
+                        juce::PathStrokeType::rounded));
+
+        const float tipX = cx - rr * 0.16f;
+        const float tipY = cy - rr * 0.99f;
+
+        juce::Path head;
+        head.addTriangle (tipX - 3.4f, tipY + 0.4f,
+                          tipX + 3.6f, tipY - 3.6f,
+                          tipX + 3.4f, tipY + 4.2f);
+        g.fillPath (head);
+        return;
+    }
+
     const float cx = b.getCentreX();
     const float cy = b.getCentreY();
     const float r  = juce::jmin (b.getWidth(), b.getHeight()) * 0.5f - 7.0f;
@@ -629,7 +657,7 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
                      &measureButton, &exportButton, &retempoButton, &demoClockToggle,
                      &orientHButton, &orientVButton, &pickImageButton, &clearImageButton,
                      &hintToggle,
-                     &setStartButton, &undoSetStartButton, &annotateButton,
+                     &setStartButton, &annotateButton,
                      &styleApplyButton, &styleClearButton, &styleCancelButton,
                      &onlineLyricsButton, &searchGoButton, &searchLoadButton,
                      &searchLxButton, &simplifyToggle, &standalonePlayButton,
@@ -640,8 +668,8 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
         addAndMakeVisible (*b);
     }
 
-    for (auto* b : { &orientButton, &logoButton, &closeSettingsButton, &closeAboutButton,
-                     &closeSearchButton })
+    for (auto* b : { &orientButton, &undoSetStartButton, &logoButton,
+                     &closeSettingsButton, &closeAboutButton, &closeSearchButton })
     {
         b->addListener (this);
         addAndMakeVisible (*b);
@@ -976,8 +1004,8 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     segLineButton   .setButtonText (tr (Lang::TextId::segLine));
     segWordButton   .setButtonText (tr (Lang::TextId::segWord));
 
-    minusButton     .setButtonText (juce::String::fromUTF8 ("\xe2\x80\xb9"));    // ‹
-    plusButton      .setButtonText (juce::String::fromUTF8 ("\xe2\x80\xba"));    // ›
+    minusButton     .setButtonText (juce::String());
+    plusButton      .setButtonText (juce::String());
     resetButton     .setButtonText (tr (Lang::TextId::reset));
     demoPlayButton  .setButtonText (tr (Lang::TextId::playSymbol));
     demoStopButton  .setButtonText (tr (Lang::TextId::stopSymbol));
@@ -1009,7 +1037,6 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     clearImageButton.setButtonText (tr (Lang::TextId::clearImage));
 
     setStartButton   .setButtonText (tr (Lang::TextId::setStart));
-    undoSetStartButton.setButtonText (juce::String::fromUTF8 ("\xe2\x86\xba"));   // ↺
     annotateButton   .setButtonText (tr (annotateMode ? Lang::TextId::tapFinish
                                                       : Lang::TextId::annotateShort));
     onlineLyricsButton.setButtonText (tr (Lang::TextId::onlineLyrics));
@@ -1188,15 +1215,17 @@ void LyricSyncEditor::refreshLookAndFeel()
     l.setColour (juce::TooltipWindow::textColourId,       palette.text);
     l.setColour (juce::TooltipWindow::outlineColourId,    palette.panelEdge);
 
-    offsetLabel.setColour (juce::Label::textColourId, palette.dim);
-    offsetLabel.setColour (juce::Label::backgroundColourId, palette.card);
+    // 步进器里的数值：白字、无底色（底色由 paintStepperBox 统一画）
+    offsetLabel.setColour (juce::Label::textColourId, palette.text);
+    offsetLabel.setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     offsetLabel.addMouseListener (this, false);
     offsetLabel.setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
     fontLabel.addMouseListener (this, false);
     fontLabel.setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
     hintLabel.setColour (juce::Label::textColourId, palette.faint);
     fileLabel.setColour (juce::Label::textColourId, palette.dim);
-    fontLabel.setColour (juce::Label::textColourId, palette.dim);
+    fontLabel.setColour (juce::Label::textColourId, palette.text);
+    fontLabel.setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
     audioLabel.setColour (juce::Label::textColourId, palette.dim);
 
     closeSettingsButton.normalColour = palette.dim;
@@ -1562,7 +1591,7 @@ void LyricSyncEditor::styleSidebarControls()
     const auto onFg = light ? juce::Colour (0xff0e9e86) : juce::Colour (0xff5ce1c1);
 
     for (auto* b : { &loadButton, &pasteButton, &onlineLyricsButton,
-                     &setStartButton, &undoSetStartButton,
+                     &setStartButton,
                      &annotateButton, &exportButton, &gearButton, &castButton,
                      &resetButton })
     {
@@ -1589,6 +1618,11 @@ void LyricSyncEditor::styleSidebarControls()
     orientButton.hoverColour  = light ? juce::Colour (0xff2b3242) : juce::Colour (0xfff2f2f4);
     orientButton.boxed = true;
     orientButton.boxFill = bg;
+
+    undoSetStartButton.normalColour = light ? juce::Colour (0xff8b94a6)
+                                            : juce::Colour (0xff8e8e99);
+    undoSetStartButton.hoverColour  = light ? juce::Colour (0xff2b3242)
+                                            : juce::Colour (0xfff2f2f4);
 
     // 分段开关：底槽自己画，两个按钮裸色块
     for (auto* b : { &segLineButton, &segWordButton })
@@ -2122,35 +2156,15 @@ void LyricSyncEditor::paint (juce::Graphics& g)
 
 void LyricSyncEditor::paintOverChildren (juce::Graphics& g)
 {
-    if (! annotateButton.isVisible())
+    // 「着色」按钮只保留文字，不再在前面画刷子图标；
+    // 进入着色模式时用一圈强调色描边提示状态。
+    if (! annotateButton.isVisible() || ! annotateMode)
         return;
 
     const auto b = annotateButton.getBounds().toFloat();
 
-    // 小选择框正好压到按钮上时，别把刷子画到卡片上面去
-    if (styleEditIndex >= 0)
-    {
-        const auto c = styleCard();
-        const auto cardPhys = juce::Rectangle<float> (
-            originX + c.getX() * uiScaleX, originY + c.getY() * uiScaleY,
-            c.getWidth() * uiScaleX, c.getHeight() * uiScaleY);
-
-        if (cardPhys.intersects (b))
-            return;
-    }
-
-    const float s = juce::jmin (b.getHeight(), 18.0f);
-    const auto icon = juce::Rectangle<float> (b.getX() + 7.0f,
-                                              b.getCentreY() - s * 0.5f, s, s);
-
-    drawBrushIcon (g, icon, annotateMode ? palette.accent
-                                         : palette.text.withAlpha (0.85f));
-
-    if (annotateMode)
-    {
-        g.setColour (palette.accent.withAlpha (0.75f));
-        g.drawRoundedRectangle (b.reduced (0.8f), 7.0f, 1.4f);
-    }
+    g.setColour (palette.accent.withAlpha (0.75f));
+    g.drawRoundedRectangle (b.reduced (0.8f), 7.0f, 1.4f);
 }
 
 void LyricSyncEditor::paintHeader (juce::Graphics& g)
@@ -2332,13 +2346,38 @@ void LyricSyncEditor::paintRailIcons (juce::Graphics& g)
 //  方案 v4 · 侧栏：近黑底、1px 细边、内联搜索、步进器、四格工具条
 //==============================================================================
 void LyricSyncEditor::paintStepperBox (juce::Graphics& g, juce::Rectangle<float> box,
-                                       const juce::String&, bool active)
+                                       const juce::String&, bool active, bool chevrons)
 {
     const bool light = palette.text.getPerceivedBrightness() < 0.5f;
     const auto line = light ? juce::Colour (0xffd4dbea) : juce::Colour (0xff33333a);
 
     g.setColour (active ? palette.accent : line);
     g.drawRoundedRectangle (box.reduced (0.5f), 8.0f, active ? 1.4f : 1.0f);
+
+    // ‹ › 自己画成折线，不用字体里的字符（有些系统字体没有这两个字形）
+    if (chevrons)
+    {
+        const float cy = box.getCentreY();
+        const auto arrowCol = light ? juce::Colour (0xff8b94a6) : juce::Colour (0xff7a7a85);
+
+        g.setColour (arrowCol);
+
+        juce::Path left;
+        left.startNewSubPath (box.getX() + 15.0f, cy - 3.4f);
+        left.lineTo (box.getX() + 11.6f, cy);
+        left.lineTo (box.getX() + 15.0f, cy + 3.4f);
+        g.strokePath (left, juce::PathStrokeType (1.4f,
+                        juce::PathStrokeType::curved,
+                        juce::PathStrokeType::rounded));
+
+        juce::Path right;
+        right.startNewSubPath (box.getRight() - 15.0f, cy - 3.4f);
+        right.lineTo (box.getRight() - 11.6f, cy);
+        right.lineTo (box.getRight() - 15.0f, cy + 3.4f);
+        g.strokePath (right, juce::PathStrokeType (1.4f,
+                        juce::PathStrokeType::curved,
+                        juce::PathStrokeType::rounded));
+    }
 }
 
 void LyricSyncEditor::paintSidebarSearch (juce::Graphics& g)
@@ -2537,8 +2576,8 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
                     juce::Rectangle<float> (ox + 22.0f, sideOffsetStepper().getY(), 60.0f, 26.0f),
                     juce::Justification::centredLeft, false);
 
-        paintStepperBox (g, sideOffsetStepper(), {}, offsetScrub);
-        paintStepperBox (g, sideFontStepper(), {}, fontScrub);
+        paintStepperBox (g, sideOffsetStepper(), {}, offsetScrub, true);
+        paintStepperBox (g, sideFontStepper(), {}, fontScrub, false);
 
         // 逐行 / 逐字 底槽
         {
@@ -2573,6 +2612,50 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
 
     g.setColour (lineCol);
     g.drawLine (railW - 0.5f, 0.0f, railW - 0.5f, baseH(), 1.0f);
+
+    //---- 编辑歌词：侧栏换成打轴面板的头 + 操作说明 ------------------------
+    if (wide && tapMode)
+    {
+        g.setColour (palette.accent);
+        g.fillRoundedRectangle (12.0f, 14.0f, 7.0f, 7.0f, 3.5f);
+
+        drawText (g, juce::Rectangle<float> (27.0f, 10.0f, 140.0f, 18.0f),
+                  "LyricSync", 13.0f, palette.text, false, -1, {}, 1.0f,
+                  juce::Justification::centredLeft);
+
+        const float barY = 44.0f;
+
+        g.setColour (palette.accent);
+        g.fillRoundedRectangle (12.0f, barY, 3.0f, 18.0f, 1.5f);
+
+        drawText (g, juce::Rectangle<float> (21.0f, barY - 1.0f, 130.0f, 20.0f),
+                  tr (Lang::TextId::tapTitle), 12.0f, palette.accent, false, -1, {}, 1.0f,
+                  juce::Justification::centredLeft);
+
+        g.setColour (txt3);
+        g.setFont (uiFont (10.5f));
+        g.drawText (juce::String (juce::jmin (tapIndex + 1, (int) tapLines.size()))
+                      + " / " + juce::String ((int) tapLines.size()),
+                    juce::Rectangle<float> (railW - 106.0f, barY + 1.0f, 94.0f, 16.0f),
+                    juce::Justification::centredRight, false);
+
+        g.setColour (txt3);
+        g.setFont (uiFont (10.5f));
+        g.drawFittedText (tr (Lang::TextId::tapListTitle),
+                          juce::Rectangle<float> (14.0f, 74.0f, railW - 28.0f, 32.0f)
+                              .toNearestInt(),
+                          juce::Justification::topLeft, 2, 1.0f);
+
+        g.setColour (lineCol.withAlpha (0.7f));
+        g.drawLine (12.0f, 116.0f, railW - 12.0f, 116.0f, 1.0f);
+
+        // 底部：空格 = 记录本句
+        drawText (g, juce::Rectangle<float> (12.0f, baseH() - 40.0f, railW - 24.0f, 18.0f),
+                  tr (Lang::TextId::tapSpaceHint), 10.5f, txt3, false, -1.0f, {}, 1.0f,
+                  juce::Justification::centredLeft);
+
+        return;
+    }
 
     if (wide && fullSide)
     {
@@ -2636,8 +2719,8 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
                         juce::Rectangle<float> (railW - 156.0f, fnt.getY() - 14.0f, 140.0f, 12.0f),
                         juce::Justification::centredRight, false);
 
-            paintStepperBox (g, off, {}, offsetScrub);
-            paintStepperBox (g, fnt, {}, fontScrub);
+            paintStepperBox (g, off, {}, offsetScrub, true);
+            paintStepperBox (g, fnt, {}, fontScrub, false);
         }
 
         // 逐行 / 逐字 底槽
@@ -4125,6 +4208,7 @@ void LyricSyncEditor::timerCallback()
     }
 
     updateLabels (displayTime);
+    refreshStepperColours();
     repaint();
 }
 
@@ -4135,8 +4219,7 @@ void LyricSyncEditor::updateLabels (double t)
     // 偏移按秒显示（设计稿：−1.8 s），字号按像素显示（140 px = 1.0 倍）
     {
         const double secs = offsetMs / 1000.0;
-        const auto minus = juce::String::fromUTF8 ("\xe2\x88\x92");        // −
-        const auto txt = (secs < -0.049 ? minus : juce::String())
+        const auto txt = (secs < -0.049 ? juce::String ("-") : juce::String())
                        + juce::String (std::abs (secs), 1) + " s";
 
         offsetLabel.setText (txt, juce::dontSendNotification);
@@ -4245,8 +4328,29 @@ juce::String LyricSyncEditor::statusText() const
 //==============================================================================
 void LyricSyncEditor::buttonClicked (juce::Button* button)
 {
-    if (button == &loadButton)          { openFileDialog(); return; }
-    if (button == &pasteButton)         { enterEditMode(); return; }
+    if (button == &loadButton)
+    {
+        // 载入：默认开文件对话框，同时留一个「粘贴文本」入口
+        juce::PopupMenu menu;
+        menu.addItem (1, tr (Lang::TextId::loadLyrics));
+        menu.addItem (2, tr (Lang::TextId::pasteEdit));
+
+        juce::Component::SafePointer<LyricSyncEditor> safe (this);
+
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&loadButton),
+                            [safe] (int chosen)
+                            {
+                                if (auto* ed = safe.getComponent())
+                                {
+                                    if (chosen == 1) ed->openFileDialog();
+                                    else if (chosen == 2) ed->enterEditMode();
+                                }
+                            });
+        return;
+    }
+
+    // 编辑 = 直接进「编辑歌词」：每一行的时间码和文字都能点开就地改，不再弹整块文本框
+    if (button == &pasteButton)         { enterTapMode(); return; }
     if (button == &orientButton)
     {
         setOrientation (orientation == Orientation::horizontal ? Orientation::vertical
@@ -4400,6 +4504,9 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
 
         offsetMs = juce::jlimit (-1800000.0, 1800000.0, offsetMs);
         processor.setSetting (Settings::offsetMs, offsetMs);
+        offsetFlashMs = juce::Time::getMillisecondCounterHiRes() + 900.0;
+        refreshStepperColours();
+        updateLabels (displayTime);
         repaint();
     }
 
@@ -4468,8 +4575,35 @@ void LyricSyncEditor::fontStep (int px)
     fontSlider.setValue (fontScale, juce::dontSendNotification);
     processor.setSetting (Settings::fontScale, fontScale);
     saveUiPrefs();
+    fontFlashMs = juce::Time::getMillisecondCounterHiRes() + 900.0;
+    refreshStepperColours();
     updateLabels (displayTime);
     repaint();
+}
+
+/** 步进器数值：平时白色，正在调（拖 / 点 ‹ › / A- A+）时转强调绿，松手后再亮 0.9 秒。 */
+void LyricSyncEditor::refreshStepperColours()
+{
+    const double now = juce::Time::getMillisecondCounterHiRes();
+
+    const bool offHot = offsetScrub || now < offsetFlashMs;
+    const bool fntHot = fontScrub   || now < fontFlashMs;
+
+    if (offHot != offsetHot)
+    {
+        offsetHot = offHot;
+        offsetLabel.setColour (juce::Label::textColourId,
+                               offHot ? palette.accent : palette.text);
+        offsetLabel.repaint();
+    }
+
+    if (fntHot != fontHot)
+    {
+        fontHot = fntHot;
+        fontLabel.setColour (juce::Label::textColourId,
+                             fntHot ? palette.accent : palette.text);
+        fontLabel.repaint();
+    }
 }
 
 void LyricSyncEditor::setAdvanceMode (int mode)
@@ -4821,6 +4955,8 @@ void LyricSyncEditor::mouseDrag (const juce::MouseEvent& e)
         const double steps = std::round (dx / 10.0);          // 10px = 一格 = 0.1 秒
         offsetMs = juce::jlimit (-1800000.0, 1800000.0, offsetScrubMs + steps * 100.0);
         processor.setSetting (Settings::offsetMs, offsetMs);
+        offsetFlashMs = juce::Time::getMillisecondCounterHiRes() + 900.0;
+        refreshStepperColours();
         repaint();
         return;
     }
@@ -4832,6 +4968,8 @@ void LyricSyncEditor::mouseDrag (const juce::MouseEvent& e)
                                         fontScrubPx + dx * 0.5);
         fontScale = px / 140.0;
         processor.setSetting (Settings::fontScale, fontScale);
+        fontFlashMs = juce::Time::getMillisecondCounterHiRes() + 900.0;
+        refreshStepperColours();
         repaint();
         return;
     }
@@ -5004,6 +5142,7 @@ void LyricSyncEditor::mouseUp (const juce::MouseEvent&)
     if (offsetScrub)
     {
         offsetScrub = false;
+        offsetFlashMs = juce::Time::getMillisecondCounterHiRes() + 900.0;
         saveUiPrefs();
         repaint();
     }
@@ -5011,6 +5150,7 @@ void LyricSyncEditor::mouseUp (const juce::MouseEvent&)
     if (fontScrub)
     {
         fontScrub = false;
+        fontFlashMs = juce::Time::getMillisecondCounterHiRes() + 900.0;
         saveUiPrefs();
         repaint();
     }

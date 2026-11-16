@@ -46,7 +46,7 @@ public:
 class IconButton : public juce::Button
 {
 public:
-    enum class Icon { gear, close, none, orient };
+    enum class Icon { gear, close, none, orient, undo };
 
     explicit IconButton (Icon iconToDraw) : juce::Button (juce::String()), icon (iconToDraw) {}
 
@@ -160,7 +160,8 @@ private:
     void toggleSidebar();
     void paintSidebarSearch (juce::Graphics& g);
     void paintStepperBox (juce::Graphics& g, juce::Rectangle<float> box,
-                          const juce::String& value, bool active = false);
+                          const juce::String& value, bool active = false,
+                          bool chevrons = false);
 
     //---- 侧栏 / 底部面板几何（内联搜索 + 步进器 + 分段开关） -----------------
     juce::Rectangle<float> sideTopRow() const;
@@ -176,6 +177,7 @@ private:
     int  sideResultAt (juce::Point<float> logical) const;
     void fontStep (int px);
     void setAdvanceMode (int mode);
+    void refreshStepperColours();          // 步进器数值：平时白字，调整时转绿
 
     void paintStage  (juce::Graphics& g, juce::Rectangle<float> area);
     void paintTapStage (juce::Graphics& g, juce::Rectangle<float> area);
@@ -394,6 +396,10 @@ private:
     double offsetScrubMs  = 0.0;
     bool   fontScrub      = false;    // 正在拖「字号」数值
     double fontScrubPx    = 140.0;
+    bool   offsetHot      = false;    // 数值正在被调整（文字转强调色）
+    bool   fontHot        = false;
+    double offsetFlashMs  = 0.0;      // 调整后高亮保持到什么时候
+    double fontFlashMs    = 0.0;
     juce::Rectangle<float> standaloneSeekBar;  // 逻辑坐标，自绘进度条热区
 
     // 在线搜歌词的后台线程池。用池而不是 std::thread::detach()：
@@ -498,7 +504,8 @@ private:
     juce::TextButton  exportButton;
     juce::TextButton  retempoButton;
     juce::TextButton  hintToggle;
-    juce::TextButton  setStartButton, undoSetStartButton;
+    juce::TextButton  setStartButton;
+    IconButton        undoSetStartButton { IconButton::Icon::undo };
     juce::TextButton  annotateButton;
     juce::TextButton  styleApplyButton, styleClearButton, styleCancelButton;
     juce::TextEditor  styleNoteEditor;

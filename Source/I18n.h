@@ -70,6 +70,7 @@ namespace Lang
         tipTapHost,
         tapHostKeyHint,
         tapEditTitle,
+        tapSpaceHint,
         tapRowText,
         tapRowTime,
         tapRowRestamp,
