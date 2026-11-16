@@ -346,6 +346,10 @@ private:
     bool   standaloneSeekDragging = false;
     juce::Rectangle<float> standaloneSeekBar;  // 逻辑坐标，自绘进度条热区
 
+    // 在线搜歌词的后台线程池。用池而不是 std::thread::detach()：
+    // 宿主卸载插件时可以把它们停掉并等待退出，否则 DLL 卸载会被在途线程拖住。
+    juce::ThreadPool networkPool { 2 };
+
     bool   searchOpen  = false;
     bool   searchBusy  = false;
     juce::String searchStatus;

@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "1.9.8";
+    const char* const kVersion = "1.9.9";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -677,6 +677,8 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     applyUiText (true);
     refreshLookAndFeel();
     updateVisibility();
+    OnlineLyrics::resetCancel();      // 编辑器重建后恢复正常联网
+
     startTimerHz (30);
     hintRotateMs = juce::Time::getMillisecondCounterHiRes();
 
@@ -686,6 +688,13 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
 LyricSyncEditor::~LyricSyncEditor()
 {
     stopTimer();
+
+    // 关键：先把在途的网络请求掐掉，再等后台线程退出。
+    // 之前用的是 std::thread(...).detach()，宿主关工程时如果还有请求在跑，
+    // Cubase 卸载插件 DLL 就会被这条线程拖住 —— 表现为「卸载 MixConsole」卡死。
+    OnlineLyrics::cancelAll();
+    networkPool.removeAllJobs (true, 3000);
+
     tooltipWindow.reset();
     chooser.reset();
     setLookAndFeel (nullptr);
@@ -3911,7 +3920,7 @@ void LyricSyncEditor::startSearch()
     // 整段 try/catch：任何异常都要回一次结果，否则 searchBusy 会永久卡死。
     juce::Component::SafePointer<LyricSyncEditor> safe (this);
 
-    std::thread ([safe, title, artist, duration, url, token]()
+    networkPool.addJob ([safe, title, artist, duration, url, token]()
     {
         OnlineLyrics::Outcome outcome;
 
@@ -3930,7 +3939,7 @@ void LyricSyncEditor::startSearch()
             if (auto* ed = safe.getComponent())
                 ed->searchFinished (outcome, token);
         });
-    }).detach();
+    });
 }
 
 /** 连接超时管不住"连上后不返回数据"，这里给整次请求兜一个总时限。 */
@@ -4006,7 +4015,7 @@ void LyricSyncEditor::loadSelectedResult()
 
     juce::Component::SafePointer<LyricSyncEditor> safe (this);
 
-    std::thread ([safe, result, simplify, token]()
+    networkPool.addJob ([safe, result, simplify, token]()
     {
         juce::String lrc;
 
@@ -4024,7 +4033,7 @@ void LyricSyncEditor::loadSelectedResult()
             if (auto* ed = safe.getComponent())
                 ed->downloadFinished (lrc, label, token);
         });
-    }).detach();
+    });
 }
 
 void LyricSyncEditor::downloadFinished (juce::String lrc, juce::String label, int token)
@@ -4066,7 +4075,7 @@ void LyricSyncEditor::startLxFetch()
 
     juce::Component::SafePointer<LyricSyncEditor> safe (this);
 
-    std::thread ([safe, url, simplify]()
+    networkPool.addJob ([safe, url, simplify]()
     {
         OnlineLyrics::LxResult result;
 
@@ -4084,7 +4093,7 @@ void LyricSyncEditor::startLxFetch()
             if (auto* ed = safe.getComponent())
                 ed->lxFinished (result);
         });
-    }).detach();
+    });
 }
 
 void LyricSyncEditor::lxFinished (OnlineLyrics::LxResult result)

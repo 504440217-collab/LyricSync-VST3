@@ -50,6 +50,16 @@ namespace OnlineLyrics
         juce::String error;           // "connect" / "noLyric" / 空 = 成功
     };
 
+    /**
+     *  卸载前收尾：关掉正在使用的 WinHTTP 句柄，让在途请求立刻返回，
+     *  并把取消标记置位，后续请求直接放弃（不再发起新的连接）。
+     *  必须在销毁编辑器之前调用，否则宿主卸载插件 DLL 时会被卡住。
+     */
+    void cancelAll();
+
+    /** 新建编辑器时清掉取消标记，恢复正常联网。 */
+    void resetCancel();
+
     /** 网络连接方式：false = WinHTTP 直连（默认）；true = 跟随系统代理（v2rayN 等）。 */
     void setUseSystemProxy (bool shouldUse);
     bool isUsingSystemProxy();

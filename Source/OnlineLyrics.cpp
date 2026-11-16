@@ -27,6 +27,11 @@ namespace
     // 0 = 直连（WinHTTP NO_PROXY），1 = 跟随系统代理。GUI 线程写，后台线程读。
     std::atomic<int> gUseProxy { 0 };
 
+    // 卸载收尾：cancelAll() 置位并关闭下面两个句柄，在途请求会立刻失败返回。
+    std::atomic<bool>  gCancelled    { false };
+    std::atomic<void*> gActiveRequest{ nullptr };
+    std::atomic<void*> gActiveSession{ nullptr };
+
     const char* const kKugouHeaders =
         "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n"
         "Referer: https://www.kugou.com/\r\n";
@@ -123,6 +128,12 @@ namespace
         status = 0;
         err = 0;
 
+        if (gCancelled.load())
+        {
+            err = -2;          // 已取消（插件正在卸载）
+            return {};
+        }
+
         HttpTarget target;
 
         if (! target.parse (url))
@@ -131,7 +142,7 @@ namespace
             return {};
         }
 
-        HINTERNET session = WinHttpOpen (L"LyricSync/1.9.6 (VST3 lyrics plugin)",
+        HINTERNET session = WinHttpOpen (L"LyricSync/1.9.9 (VST3 lyrics plugin)",
                                          useProxy ? WINHTTP_ACCESS_TYPE_DEFAULT_PROXY
                                                   : WINHTTP_ACCESS_TYPE_NO_PROXY,
                                          WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
@@ -141,6 +152,8 @@ namespace
             err = static_cast<int> (GetLastError());
             return {};
         }
+
+        gActiveSession.store (session);
 
         // 解析 3s、连接 5s、发送 5s、接收 8s
         WinHttpSetTimeouts (session, 3000, timeoutMs, 5000, 8000);
@@ -176,6 +189,8 @@ namespace
 
             if (request != nullptr)
             {
+                gActiveRequest.store (request);
+
                 if (headers.isNotEmpty())
                     WinHttpAddRequestHeaders (request, headers.toWideCharPointer(),
                                               static_cast<DWORD> (-1),
@@ -215,7 +230,9 @@ namespace
                     err = static_cast<int> (GetLastError());
                 }
 
-                WinHttpCloseHandle (request);
+                // cancelAll() 可能已经从另一个线程关掉了它，别关第二次
+                if (gActiveRequest.exchange (nullptr) == request)
+                    WinHttpCloseHandle (request);
             }
             else
             {
@@ -229,7 +246,8 @@ namespace
             err = static_cast<int> (GetLastError());
         }
 
-        WinHttpCloseHandle (session);
+        if (gActiveSession.exchange (nullptr) == session)
+            WinHttpCloseHandle (session);
 
         if (bytes.empty())
             return {};
@@ -262,12 +280,30 @@ namespace
                 return viaWinHttp;
             }
 
+            if (winErr == -2)
+            {
+                if (errorCode != nullptr)
+                    *errorCode = -2;
+
+                return {};     // 正在卸载，直接放弃，不再走 WinINet 兜底
+            }
+
             if (errorCode != nullptr)
                 *errorCode = winErr;
 
             status = 0;
         }
        #endif
+
+        // 代理模式下走的是 juce::URL（WinINet），没有句柄可关，
+        // 用取消标记兜住：卸载时的请求直接放弃，不再发起新连接。
+        if (gCancelled.load())
+        {
+            if (errorCode != nullptr)
+                *errorCode = -2;
+
+            return {};
+        }
 
         const auto options =
             juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
@@ -1004,6 +1040,24 @@ Outcome search (juce::String title, juce::String artist,
     outcome.error = "notfound";
     outcome.detail = diag.trim();
     return outcome;
+}
+
+void cancelAll()
+{
+    gCancelled.store (true);
+
+   #if JUCE_WINDOWS
+    if (auto* req = gActiveRequest.exchange (nullptr))
+        WinHttpCloseHandle (static_cast<HINTERNET> (req));
+
+    if (auto* ses = gActiveSession.exchange (nullptr))
+        WinHttpCloseHandle (static_cast<HINTERNET> (ses));
+   #endif
+}
+
+void resetCancel()
+{
+    gCancelled.store (false);
 }
 
 void setUseSystemProxy (bool shouldUse)
