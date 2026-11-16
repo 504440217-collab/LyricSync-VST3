@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.0.1";
+    const char* const kVersion = "2.0.2";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -4032,6 +4032,36 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
         previewDragStartOffset = previewOffset;
         setMouseCursor (juce::MouseCursor::DraggingHandCursor);
     }
+}
+
+/** 双击歌词区 = 全屏纯享；再双击或按 Esc 退出。 */
+void LyricSyncEditor::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (e.eventComponent != this)
+        return;
+
+    if (zenMode)
+    {
+        toggleZenMode();
+        return;
+    }
+
+    if (editing || tapMode || annotateMode || settingsOpen || aboutOpen || searchOpen
+        || styleEditIndex >= 0)
+        return;
+
+    if (! stageArea().transformedBy (uiTransform).contains (e.position))
+        return;
+
+    // 读数条区域双击不该进全屏（那里有进度条和按钮）
+    const auto logical = toLogicalPoint (e.position);
+
+    if (hudBounds().expanded (0.0f, 10.0f).contains (logical))
+        return;
+
+    // 双击前 mouseDown 已经起了「拖动预览」，这里清掉，免得进入全屏后歌词还在被拖着
+    previewDragging = false;
+    toggleZenMode();
 }
 
 void LyricSyncEditor::mouseDrag (const juce::MouseEvent& e)
