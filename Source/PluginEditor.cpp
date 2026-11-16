@@ -4034,36 +4034,6 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
     }
 }
 
-/** 双击歌词区 = 全屏纯享；再双击或按 Esc 退出。 */
-void LyricSyncEditor::mouseDoubleClick (const juce::MouseEvent& e)
-{
-    if (e.eventComponent != this)
-        return;
-
-    if (zenMode)
-    {
-        toggleZenMode();
-        return;
-    }
-
-    if (editing || tapMode || annotateMode || settingsOpen || aboutOpen || searchOpen
-        || styleEditIndex >= 0)
-        return;
-
-    if (! stageArea().transformedBy (uiTransform).contains (e.position))
-        return;
-
-    // 读数条区域双击不该进全屏（那里有进度条和按钮）
-    const auto logical = toLogicalPoint (e.position);
-
-    if (hudBounds().expanded (0.0f, 10.0f).contains (logical))
-        return;
-
-    // 双击前 mouseDown 已经起了「拖动预览」，这里清掉，免得进入全屏后歌词还在被拖着
-    previewDragging = false;
-    toggleZenMode();
-}
-
 void LyricSyncEditor::mouseDrag (const juce::MouseEvent& e)
 {
     if (hudDrag && e.eventComponent == this)
@@ -6334,7 +6304,12 @@ void LyricSyncEditor::toggleZenMode()
 //==============================================================================
 void LyricSyncEditor::mouseDoubleClick (const juce::MouseEvent& e)
 {
-    if (settingsOpen || aboutOpen || editing || tapMode)
+    if (settingsOpen || aboutOpen || searchOpen || editing || tapMode
+        || annotateMode || styleEditIndex >= 0)
+        return;
+
+    // 读数条上双击不该进全屏（那里是进度条和按钮）
+    if (hudBounds().expanded (0.0f, 10.0f).contains (toLogicalPoint (e.position)))
         return;
 
     if (stageArea().transformedBy (uiTransform).contains (e.position))
