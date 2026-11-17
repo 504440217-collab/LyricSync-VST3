@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.3.5";
+    const char* const kVersion = "2.3.6";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -7465,7 +7465,7 @@ void LyricSyncEditor::keepTapRowVisible (int lineId)
 
     for (int p = 0; p < n; ++p)
     {
-        if (ids[(size_t) p] != lineId)
+        if (p != lineId)
             continue;
 
         if (p < tapListScroll)
