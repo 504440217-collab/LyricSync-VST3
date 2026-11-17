@@ -467,6 +467,10 @@ private:
     std::vector<double>       tapTimes;
     int  tapIndex = 0;
     int  tapEditIndex = -1;               // >=0 表示正在编辑某一行
+    int  tapListSelected = -1;            // 单击选中的已记录行（双击才进编辑）
+    bool tapStagePress = false;           // 舞台按下，抬起时判定「点击打轴 / 拖动翻看」
+    juce::Point<float> tapStagePressPos;
+    int  tapStagePressLine = -1;          // 按下时命中的歌词行
     int  tapArmIndex = -1;                // >=0 表示已预备重打第 N 句，下一次打点只写这一句
     int  tapListScroll = 0;               // 列表往回翻了几行（0 = 停在最新）
     bool tapListDragging = false;         // 正抓住滚动条滑块上下拖

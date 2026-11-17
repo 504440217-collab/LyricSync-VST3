@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.2.5";
+    const char* const kVersion = "2.3.0";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -3545,12 +3545,24 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
             const int  li = ids[(size_t) i];
 
             const bool thisEditing = (li == tapEditIndex);
+            const bool thisSel     = (li == tapListSelected && ! thisEditing);
+            const bool thisCurrent = (li == tapIndex - 1 && tapIndex > 0 && ! thisEditing);
 
             g.setColour (thisEditing ? palette.accent.withAlpha (0.10f)
+                       : thisSel     ? palette.accent.withAlpha (0.16f)
+                       : thisCurrent ? palette.accent.withAlpha (0.08f)
                                      : palette.text.withAlpha (0.05f));
             g.fillRoundedRectangle (r, 5.0f);
 
+            if (thisCurrent)
+            {
+                // 播放头唱到的那一句：强调色描边，和右侧歌词同步提示
+                g.setColour (palette.accent.withAlpha (0.85f));
+                g.drawRoundedRectangle (r.expanded (1.2f), 6.0f, 1.3f);
+            }
+
             g.setColour (thisEditing ? palette.accent.withAlpha (0.55f)
+                       : thisSel     ? palette.accent.withAlpha (0.50f)
                                      : palette.text.withAlpha (0.10f));
             g.drawRoundedRectangle (r, 5.0f, 1.0f);
 
@@ -5119,8 +5131,9 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 
     if (tapMode)
     {
+        // 正在编辑某一行：点击其它地方直接退出编辑（不必点「取消」）
         if (tapEditIndex >= 0)
-            return;                       // 正在编辑某一行，画布点击不记录
+            closeTapRowEditing();
 
         grabKeyboardFocus();
 
@@ -5164,18 +5177,32 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
             if (! rows[(size_t) i].contains (p))
                 continue;
 
-            // 点右侧的环形箭头 = 预备重打这一句；点行本身 = 编辑这一句
+            // 点右侧的环形箭头 = 预备重打这一句；点行本身 = 选中这一句（双击才编辑）
             if (tapRowArmButton (rows[(size_t) i]).contains (p))
+            {
                 armTapLine (ids[(size_t) i]);
-            else
-                editTapRow (ids[(size_t) i]);
+                return;
+            }
 
+            tapListSelected = ids[(size_t) i];
+            repaint();
+            return;
+        }
+
+        // 舞台：按下先不动，抬起时判定——原地点击 = 给这一句打轴，按住拖动 = 翻看歌词
+        if (stageArea().contains (p))
+        {
+            tapStagePress     = true;
+            tapStagePressPos  = p;
+            tapStagePressLine = stageLineAt (p);
             return;
         }
 
         stampTap();
         return;
     }
+
+    // 点回搜索框之外没有任何附带逻辑；打轴模式到此结束
 
     // 歌词区域：按住上下拖动 = 手动预览（不出声，只是把歌词往前/后翻看）
     if (! editing && stageArea().transformedBy (uiTransform).contains (e.position))
@@ -5192,6 +5219,22 @@ void LyricSyncEditor::mouseDrag (const juce::MouseEvent& e)
     if (hudDrag && e.eventComponent == this)
     {
         hudSeekTo (toLogicalPoint (e.position));
+        return;
+    }
+
+    // 打轴舞台：按下后拖动超过阈值 = 转成「按住上下拖动翻看歌词」
+    if (tapStagePress && e.eventComponent == this)
+    {
+        const auto p = toLogicalPoint (e.position);
+
+        if (std::abs (p.y - tapStagePressPos.y) > 6.0f)
+        {
+            tapStagePress = false;
+            previewDragging = true;
+            previewDragStartY = e.y;
+            previewDragStartOffset = previewOffset;
+            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+        }
         return;
     }
 
@@ -5383,8 +5426,23 @@ void LyricSyncEditor::mouseWheelMove (const juce::MouseEvent& e,
     repaint();
 }
 
-void LyricSyncEditor::mouseUp (const juce::MouseEvent&)
+void LyricSyncEditor::mouseUp (const juce::MouseEvent& e)
 {
+    // 打轴舞台：没有拖动的原地抬起 = 给按下的那一句打轴
+    if (tapStagePress && e.eventComponent == this)
+    {
+        tapStagePress = false;
+
+        if (tapStagePressLine >= 0)
+        {
+            tapArmIndex = tapStagePressLine;   // 复用打轴写入逻辑：预备这一句再打点
+            stampTap();
+            return;
+        }
+
+        stampTap();        // 点在空白处：照旧给指针那一句打点
+        return;
+    }
     if (hudDrag)
     {
         hudDrag = false;
@@ -6411,7 +6469,7 @@ void LyricSyncEditor::stampTap()
     {
         tapArmIndex = -1;
         tapIndex = juce::jmin (target + 1, static_cast<int> (tapLines.size()));
-        tapListScroll = 0;
+        // 注意：不再把 tapListScroll 清零 —— 那会让列表突然跳回顶部
         lastWarning = tr (Lang::TextId::tapArmDone) + juce::String (target + 1);
     }
     else
@@ -7634,7 +7692,28 @@ void LyricSyncEditor::mouseDoubleClick (const juce::MouseEvent& e)
         return;
     }
 
-    if (settingsOpen || aboutOpen || editing || tapMode)
+    // 打轴列表：双击某一行 = 进入编辑（单击只是选中）
+    if (tapMode && ! editing)
+    {
+        const auto rows = tapListRows (stageArea());
+        const auto ids  = tapListIndices();
+        const auto p    = toLogical (e.position);
+
+        for (int i = 0; i < static_cast<int> (rows.size()); ++i)
+        {
+            if (rows[(size_t) i].contains (p)
+                && ! tapRowArmButton (rows[(size_t) i]).contains (p))
+            {
+                tapListSelected = ids[(size_t) i];
+                editTapRow (ids[(size_t) i]);
+                return;
+            }
+        }
+
+        return;
+    }
+
+    if (settingsOpen || aboutOpen || editing)
         return;
 
     if (stageArea().transformedBy (uiTransform).contains (e.position))
