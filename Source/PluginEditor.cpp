@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.1.1";
+    const char* const kVersion = "2.1.2";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -1416,6 +1416,10 @@ float LyricSyncEditor::railWidth() const
     if (orientation == Orientation::vertical)
         return 40.0f;
 
+    // 收起/展开动画进行中返回当前动画宽度，未动画时直接给目标值
+    if (railAnimWidth >= 0.0f)
+        return railAnimWidth;
+
     return sidebarCollapsed ? 40.0f : 248.0f;
 }
 
@@ -1551,6 +1555,7 @@ juce::Rectangle<float> LyricSyncEditor::stageArea() const
 
 void LyricSyncEditor::toggleSidebar()
 {
+    railAnimWidth = railWidth();        // 从当前宽度滑向目标宽度
     sidebarCollapsed = ! sidebarCollapsed;
     saveUiPrefs();
     updateVisibility();
@@ -2097,12 +2102,14 @@ void LyricSyncEditor::resized()
                                                          rowH));
                 }
 
-                // 三个动作按钮落在列表下方那一条
-                const float by = stage.getBottom() - 32.0f;
+                // 三个动作按钮：设计稿里收进侧栏底部一行（退出/完成的位置）
+                const float bsw = railWidth() - 24.0f;
+                const float bbw = (bsw - 8.0f) / 3.0f;
+                const float bby = baseH() - 62.0f;
 
-                tapRowRestampButton.setBounds (scaledRect (stage.getX(), by, 108.0f, 26.0f));
-                tapRowApplyButton  .setBounds (scaledRect (stage.getX() + 116.0f, by, 108.0f, 26.0f));
-                tapRowCancelButton .setBounds (scaledRect (stage.getX() + 232.0f, by, 108.0f, 26.0f));
+                tapRowRestampButton.setBounds (scaledRect (12.0f, bby, bbw, 28.0f));
+                tapRowApplyButton  .setBounds (scaledRect (12.0f + bbw + 4.0f, bby, bbw, 28.0f));
+                tapRowCancelButton .setBounds (scaledRect (12.0f + 2.0f * (bbw + 4.0f), bby, bbw, 28.0f));
             }
             else
             {
@@ -2793,8 +2800,8 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
         }
     }
 
-    // 收起态：只用图标代替整列按钮
-    if (! wide)
+    // 收起态：只用图标代替整列按钮（以目标状态为准，动画中途不闪）
+    if (! wide && sidebarCollapsed)
         paintRailIcons (g);
 
     // 折叠键：贴在侧栏右缘的垂直中点
@@ -2855,6 +2862,10 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
         paintTapStage (g, area);
         return;
     }
+
+    // 侧栏展开的编辑模式：列表画进侧栏，舞台继续往下画正常歌词
+    if (tapMode && orientation == Orientation::horizontal && railWidth() > 60.0f)
+        paintTapList (g, tapListArea(), true);
 
     if (editing)
         return;
@@ -3372,10 +3383,57 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
                   tr (Lang::TextId::tapDoneLabel), 23.0f * widthScale, palette.ok, true);
     }
 
-    //---- 已记录列表（可点，点一行就从那一句重打）-------------------------
-    if (hasList)
+    // 已记录列表 + 滚动条抽成了 paintTapList：侧栏展开时画进侧栏，其余画进舞台
+    paintTapList (g, area, listInSide);
+
+    //---- 底部提示 -------------------------------------------------------
+    if (armed)
     {
-        const auto ids = tapListIndices();
+        const double at = tapTimes[(size_t) shown];
+        const juce::String seekHint = at >= 0.0
+            ? tr (Lang::TextId::tapArmSeek) + formatTimecode (juce::jmax (0.0, at - 3.0))
+              + tr (Lang::TextId::tapArmSeek2)
+            : tr (Lang::TextId::tapArmHint);
+
+        drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 66.0f : 92.0f), cw, 20.0f),
+                  seekHint, 11.0f * widthScale, palette.warn, false);
+
+        drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 44.0f : 68.0f), cw, 24.0f),
+                  tr (Lang::TextId::tapArmTitle) + "  #" + juce::String (shown + 1)
+                    + "   " + tr (Lang::TextId::tapHint) + "   (Esc)",
+                  (v ? 13.5f : 15.0f) * widthScale, palette.accent, true);
+    }
+    else
+    {
+        drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 66.0f : 92.0f), cw, 20.0f),
+                  tr (Lang::TextId::tapHint), 11.0f * widthScale, palette.dim, false);
+
+        drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 44.0f : 68.0f), cw, 24.0f),
+                  tr (Lang::TextId::tapWillStamp) + "  " + formatTimecode (displayTime),
+                  (v ? 14.0f : 16.0f) * widthScale, palette.accent, true);
+    }
+
+    const bool paused = tapMode && demoMode && ! demoPlaying;
+
+    drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 22.0f : 38.0f), cw, 18.0f),
+              paused ? tr (Lang::TextId::tapPausedWarn) : tr (Lang::TextId::tapSpaceWarn),
+              10.0f * widthScale, paused ? palette.warn : palette.faint, false);
+}
+
+//==============================================================================
+//  已记录列表：侧栏展开时画进侧栏（listInSide），否则画在舞台右侧
+//==============================================================================
+void LyricSyncEditor::paintTapList (juce::Graphics& g,
+                                    const juce::Rectangle<float>& area,
+                                    bool listInSide)
+{
+    const auto rows = tapListRows (area);
+
+    //---- 已记录列表（可点，点一行就从那一句重打）-------------------------
+    const auto ids = tapListIndices();
+
+    if (! rows.empty())
+    {
 
         if (! listInSide)
         {
@@ -3503,38 +3561,6 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
         }
     }
 
-    //---- 底部提示 -------------------------------------------------------
-    if (armed)
-    {
-        const double at = tapTimes[(size_t) shown];
-        const juce::String seekHint = at >= 0.0
-            ? tr (Lang::TextId::tapArmSeek) + formatTimecode (juce::jmax (0.0, at - 3.0))
-              + tr (Lang::TextId::tapArmSeek2)
-            : tr (Lang::TextId::tapArmHint);
-
-        drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 66.0f : 92.0f), cw, 20.0f),
-                  seekHint, 11.0f * widthScale, palette.warn, false);
-
-        drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 44.0f : 68.0f), cw, 24.0f),
-                  tr (Lang::TextId::tapArmTitle) + "  #" + juce::String (shown + 1)
-                    + "   " + tr (Lang::TextId::tapHint) + "   (Esc)",
-                  (v ? 13.5f : 15.0f) * widthScale, palette.accent, true);
-    }
-    else
-    {
-        drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 66.0f : 92.0f), cw, 20.0f),
-                  tr (Lang::TextId::tapHint), 11.0f * widthScale, palette.dim, false);
-
-        drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 44.0f : 68.0f), cw, 24.0f),
-                  tr (Lang::TextId::tapWillStamp) + "  " + formatTimecode (displayTime),
-                  (v ? 14.0f : 16.0f) * widthScale, palette.accent, true);
-    }
-
-    const bool paused = tapMode && demoMode && ! demoPlaying;
-
-    drawText (g, juce::Rectangle<float> (cx, area.getBottom() - (v ? 22.0f : 38.0f), cw, 18.0f),
-              paused ? tr (Lang::TextId::tapPausedWarn) : tr (Lang::TextId::tapSpaceWarn),
-              10.0f * widthScale, paused ? palette.warn : palette.faint, false);
 }
 
 //==============================================================================
@@ -4160,6 +4186,26 @@ void LyricSyncEditor::timerCallback()
     lastTickMs = now;
 
     watchSearchTimeout (now);
+
+    // 侧栏收起/展开的滑动动画：宽度向目标值缓动，每帧重排 + 重算可见性
+    if (orientation == Orientation::horizontal && railAnimWidth >= 0.0f)
+    {
+        const float target = sidebarCollapsed ? 40.0f : 248.0f;
+        const float diff   = target - railAnimWidth;
+
+        if (std::abs (diff) > 0.5f)
+        {
+            railAnimWidth += diff * 0.30f;
+            if (std::abs (target - railAnimWidth) < 1.0f)
+                railAnimWidth = -1.0f;          // 到位：交回目标值
+            updateVisibility();
+            resized();
+        }
+        else
+        {
+            railAnimWidth = -1.0f;
+        }
+    }
 
     auto updates = processor.timeUpdates.load();
     if (updates != lastTimeUpdates)

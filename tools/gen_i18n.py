@@ -90,7 +90,7 @@ TABLE = [
     ("tapDoneLabel",     "打轴结果", "Tap timing result"),
     ("tapUndo",          "撤销", "Undo"),
     ("tapRestart",       "重打本句", "Redo line"),
-    ("tapNudgeBack",     "−10 ms", "−10 ms"),
+    ("tapNudgeBack",     "-10 ms", "-10 ms"),
     ("tapNudgeFwd",      "+10 ms", "+10 ms"),
     ("tapPause",         "暂停", "Pause"),
     ("tapHostPlay",      "宿主播放", "Host play"),

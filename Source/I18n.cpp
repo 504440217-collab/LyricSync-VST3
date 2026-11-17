@@ -63,7 +63,7 @@ namespace
         /* tapDoneLabel       */ { "\xe6\x89\x93" "\xe8\xbd\xb4" "\xe7\xbb\x93" "\xe6\x9e\x9c", "Tap timing result" },
         /* tapUndo            */ { "\xe6\x92\xa4" "\xe9\x94\x80", "Undo" },
         /* tapRestart         */ { "\xe9\x87\x8d" "\xe6\x89\x93" "\xe6\x9c\xac" "\xe5\x8f\xa5", "Redo line" },
-        /* tapNudgeBack       */ { "\xe2\x88\x92" "10 ms", "\xe2\x88\x92" "10 ms" },
+        /* tapNudgeBack       */ { "-10 ms", "-10 ms" },
         /* tapNudgeFwd        */ { "+10 ms", "+10 ms" },
         /* tapPause           */ { "\xe6\x9a\x82" "\xe5\x81\x9c", "Pause" },
         /* tapHostPlay        */ { "\xe5\xae\xbf" "\xe4\xb8\xbb" "\xe6\x92\xad" "\xe6\x94\xbe", "Host play" },
