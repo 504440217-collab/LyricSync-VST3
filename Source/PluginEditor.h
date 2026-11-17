@@ -24,6 +24,10 @@ public:
     float scale = 1.0f;
     juce::String typeface { "Microsoft YaHei UI" };
 
+    /** 提示框（tooltip）用侧栏同款中文字体，默认字体没有汉字字形会显示成方框。 */
+    juce::Font getTooltipFont (const juce::String&) override
+    { return juce::Font (typeface, 12.5f, juce::Font::plain); }
+
     juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
     juce::Font getComboBoxFont   (juce::ComboBox&) override;
     juce::Font getLabelFont      (juce::Label&) override;
@@ -153,6 +157,7 @@ private:
     void paintHeader (juce::Graphics& g);
     void paintSidebar (juce::Graphics& g);
     float railWidth() const;
+    bool  railOpenNow() const;                            // 侧栏目标状态（不含动画中间值）
     juce::Rectangle<float> railToggleRect() const;
     juce::Rectangle<float> railIconRect (int index) const;
     int  railIconAt (juce::Point<float> logical) const;
@@ -390,6 +395,8 @@ private:
     //---- Standalone 独立版走带 ----------------------------------------------
     bool   sidebarCollapsed = false;   // 左侧功能栏是否收起（写进全局偏好）
     float  railAnimWidth   = -1.0f;    // 侧栏收起/展开动画的当前宽度（<0 表示未在动画）
+    float  railAnimFrom    = 0.0f;     // 动画起点宽度
+    double railAnimStartMs = 0.0;      // 动画开始时间戳
     bool   standaloneMode = false;          // 运行时检测：只有独立版显示走带控件
     bool   standaloneSeekDragging = false;
 
@@ -523,6 +530,7 @@ private:
     juce::ComboBox    networkBox;        // 直连 / 跟随系统代理
     IconButton        closeSearchButton { IconButton::Icon::close };
     juce::TextEditor  searchTitleEditor, searchArtistEditor, customUrlEditor;
+    juce::ShapeButton lxRefreshButton { "lx", palette.dim, palette.text, palette.accent };   // 洛雪取词（音符图标）
 
     juce::TextButton  demoClockToggle;
 

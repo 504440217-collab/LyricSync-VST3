@@ -404,7 +404,7 @@ TABLE = [
     ("offsetLabel",     "偏移", "Offset"),
     ("annotateShort",   "着色", "Style"),
     ("exportShort",     "导出", "Export"),
-    ("searchRefreshTip",  "换一个歌词源：从 LX Music 取当前播放歌词",
+    ("searchRefreshTip",  "从洛雪音乐（LX Music）读取当前播放歌词",
                           "Switch source: take the playing track from LX Music"),
     ("startPrefix",     "起点 ", "Start "),
     ("offsetHint",      "±100 ms", "±100 ms"),

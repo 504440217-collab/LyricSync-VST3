@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.1.3";
+    const char* const kVersion = "2.1.4";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -769,6 +769,25 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
         addChildComponent (*ed);
     }
 
+    addAndMakeVisible (lxRefreshButton);
+
+    // 「洛雪取词」小钮：音符图标，点击从洛雪音乐读当前播放歌词，悬停有提示
+    {
+        juce::Path note;
+        note.startNewSubPath (4.6f, 5.4f);  note.lineTo (4.6f, 12.2f);
+        note.startNewSubPath (11.6f, 3.6f); note.lineTo (11.6f, 10.4f);
+        note.startNewSubPath (4.0f, 5.9f);
+        note.lineTo (12.2f, 4.1f);
+        note.lineTo (12.2f, 6.3f);
+        note.lineTo (4.0f, 8.1f);
+        note.closeSubPath();
+        note.addEllipse (1.8f, 11.4f, 4.0f, 2.8f);
+        note.addEllipse (8.8f, 9.6f, 4.0f, 2.8f);
+
+        lxRefreshButton.setShape (note, false, true, true);
+        lxRefreshButton.onClick = [this] { startLxFetch(); };
+        lxRefreshButton.setTooltip (tr (Lang::TextId::searchRefreshTip));
+    }
     searchTitleEditor.onReturnKey  = [this] { startSearch(); };
     searchArtistEditor.onReturnKey = [this] { startSearch(); };
     customUrlEditor.onReturnKey    = [this] { commitCustomUrl(); };
@@ -1278,7 +1297,7 @@ void LyricSyncEditor::updateVisibility()
     const bool overlay = settingsOpen || aboutOpen || searchOpen;
 
     // 侧栏收起后整列控件一起隐藏（竖版仍走底部布局，不受影响）
-    const bool railOpen = (orientation == Orientation::vertical) || railWidth() > 60.0f;
+    const bool railOpen = (orientation == Orientation::vertical) || railOpenNow();
     // 着色是"就地"操作：主界面的按钮一个都不隐藏
     const bool normal  = ! editing && ! tapMode && ! overlay;
 
@@ -1306,7 +1325,9 @@ void LyricSyncEditor::updateVisibility()
 
     // 内联搜索框在窄轨（收起态）里放不下，横版收起时隐藏
     searchTitleEditor.setVisible (normal && railOpen
-                                  && (orientation == Orientation::vertical || railWidth() > 60.0f));
+                                  && (orientation == Orientation::vertical || railOpenNow()));
+    lxRefreshButton.setVisible (normal && railOpen
+                                 && (orientation == Orientation::vertical || railOpenNow()));
 
     // 已废掉的控件：字号滑块换成步进器，在线搜词按钮换成内联搜索框
     fontSlider.setVisible (false);
@@ -1382,7 +1403,7 @@ void LyricSyncEditor::updateVisibility()
         c->setVisible (settingsOpen);
 
     closeAboutButton.setVisible (aboutOpen);
-    logoButton.setVisible (false);      // 左下角「关于」入口已移除，功能说明改为悬停提示
+    logoButton.setVisible (normal && railOpen);   // 点左上角 LOGO 看插件信息
 
     // 旧版弹窗里的搜索控件：内联化之后全部不再显示
     for (auto* c : { static_cast<juce::Component*> (&searchArtistEditor),
@@ -1421,6 +1442,12 @@ float LyricSyncEditor::railWidth() const
         return railAnimWidth;
 
     return sidebarCollapsed ? 40.0f : 248.0f;
+}
+
+/** 侧栏目标状态（不随动画中间值变化）：横版且未收起。 */
+bool LyricSyncEditor::railOpenNow() const
+{
+    return orientation == Orientation::horizontal && ! sidebarCollapsed;
 }
 
 juce::Rectangle<float> LyricSyncEditor::railToggleRect() const
@@ -1555,8 +1582,11 @@ juce::Rectangle<float> LyricSyncEditor::stageArea() const
 
 void LyricSyncEditor::toggleSidebar()
 {
-    railAnimWidth = railWidth();        // 从当前宽度滑向目标宽度
+    railAnimFrom    = railWidth();      // 从当前宽度滑向目标宽度
+    railAnimStartMs = juce::Time::getMillisecondCounterHiRes();
+    railAnimWidth   = railAnimFrom;
     sidebarCollapsed = ! sidebarCollapsed;
+    startTimerHz (60);                  // 动画期间 60Hz，结束回 30Hz
     saveUiPrefs();
     updateVisibility();
     resized();
@@ -1659,6 +1689,7 @@ void LyricSyncEditor::styleSidebarControls()
     }
 
     // 内联搜索框：框体在 paintSidebarSearch 里画，编辑器本身全透明
+    lxRefreshButton.setColours (palette.dim, palette.text, palette.accent);
     searchTitleEditor.setColour (juce::TextEditor::backgroundColourId, juce::Colours::transparentBlack);
     searchTitleEditor.setColour (juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
     searchTitleEditor.setColour (juce::TextEditor::focusedOutlineColourId, juce::Colours::transparentBlack);
@@ -1760,9 +1791,10 @@ void LyricSyncEditor::resized()
 
     const auto stage = stageArea();
 
-    logoButton.setBounds (scaledRect (14, 4,
-                                      orientation == Orientation::vertical ? 250.0f : 310.0f,
-                                      54));
+    if (orientation == Orientation::vertical)
+        logoButton.setBounds (scaledRect (2.0f, 8.0f, 36.0f, 26.0f));
+    else
+        logoButton.setBounds (scaledRect (12.0f, 6.0f, railWidth() - 24.0f, 26.0f));
 
     if (orientation == Orientation::horizontal)
     {
@@ -1791,6 +1823,8 @@ void LyricSyncEditor::resized()
             searchTitleEditor.setBounds (scaledRect (box.getX() + 30.0f, box.getY() + 5.0f,
                                                      refresh.getX() - box.getX() - 36.0f,
                                                      box.getHeight() - 10.0f));
+
+            lxRefreshButton.setBounds (scaledRect (refresh.reduced (1.0f)));
         }
 
         //---- 起点：文字 + 设起点 + 撤销 ----
@@ -1859,7 +1893,7 @@ void LyricSyncEditor::resized()
         }
         else if (tapMode)
         {
-            if (railWidth() > 60.0f)
+            if (railOpenNow())
             {
                 // 设计稿 pad-panel：全部按钮都在侧栏，两列并排
                 const float sx  = 12.0f;
@@ -1954,6 +1988,8 @@ void LyricSyncEditor::resized()
             searchTitleEditor.setBounds (scaledRect (box.getX() + 30.0f, box.getY() + 5.0f,
                                                      refresh.getX() - box.getX() - 36.0f,
                                                      box.getHeight() - 10.0f));
+
+            lxRefreshButton.setBounds (scaledRect (refresh.reduced (1.0f)));
 
             const auto start = sideStartRow();
             const float undoW = 26.0f;
@@ -2083,7 +2119,7 @@ void LyricSyncEditor::resized()
             if (! rr.isEmpty())
             {
                 // 侧栏展开：时间码 / 歌词上下两行，直接盖在那一行的位置上
-                if (railWidth() > 60.0f)
+                if (railOpenNow())
                 {
                     tapTimeEditor.setBounds (scaledRect (rr.getX() + 24.0f, rr.getY() + 1.0f,
                                                          rr.getWidth() - 58.0f, 19.0f));
@@ -2486,26 +2522,7 @@ void LyricSyncEditor::paintSidebarSearch (juce::Graphics& g)
                         juce::PathStrokeType::rounded));
     }
 
-    // 右侧「换一个歌词源」：圆弧 + 箭头
-    {
-        const auto r = sideSearchRefresh();
-        const float cx = r.getCentreX();
-        const float cy = r.getCentreY();
-
-        juce::Path arc;
-        arc.addCentredArc (cx, cy, 4.2f, 4.2f, 0.0f,
-                           juce::MathConstants<float>::pi * -0.35f,
-                           juce::MathConstants<float>::pi * 1.15f, true);
-
-        g.setColour (searchBusy ? palette.accent.withAlpha (0.6f) : txt3);
-        g.strokePath (arc, juce::PathStrokeType (1.3f,
-                        juce::PathStrokeType::curved,
-                        juce::PathStrokeType::rounded));
-
-        juce::Path head;
-        head.addTriangle (cx + 1.4f, cy - 6.4f, cx + 5.4f, cy - 4.4f, cx + 1.6f, cy - 2.6f);
-        g.fillPath (head);
-    }
+    // 右侧「洛雪取词」图标：改用真正的按钮（音符图标 + 悬停提示），见 lxRefreshButton
 
     //---- 结果列表 ----------------------------------------------------------
     const auto area = sideResultsArea();
@@ -2609,7 +2626,7 @@ void LyricSyncEditor::paintSidebarSearch (juce::Graphics& g)
 void LyricSyncEditor::paintSidebar (juce::Graphics& g)
 {
     const float railW = railWidth();
-    const bool wide = railW > 60.0f;
+    const bool wide = railOpenNow();
     const bool vertical = (orientation == Orientation::vertical);
 
     const bool lightTheme = palette.text.getPerceivedBrightness() < 0.5f;
@@ -2802,8 +2819,8 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
         }
     }
 
-    // 收起态：只用图标代替整列按钮（以目标状态为准，动画中途不闪）
-    if (! wide && sidebarCollapsed)
+    // 收起态：只用图标代替整列按钮（动画期间也画，跟着一起滑）
+    if (! wide)
         paintRailIcons (g);
 
     // 折叠键：贴在侧栏右缘的垂直中点
@@ -2859,14 +2876,14 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
 
     // 编辑模式：横版侧栏展开时舞台照常显示歌词 + 倒数点 + HUD（设计稿 pad 模式）；
     // 收起态 / 竖版没有侧栏，仍用舞台上的打轴面板。
-    if (tapMode && !(orientation == Orientation::horizontal && railWidth() > 60.0f))
+    if (tapMode && !(orientation == Orientation::horizontal && railOpenNow()))
     {
         paintTapStage (g, area);
         return;
     }
 
     // 侧栏展开的编辑模式：列表画进侧栏，舞台继续往下画正常歌词
-    if (tapMode && orientation == Orientation::horizontal && railWidth() > 60.0f)
+    if (tapMode && orientation == Orientation::horizontal && railOpenNow())
         paintTapList (g, tapListArea(), true);
 
     if (editing)
@@ -3313,7 +3330,7 @@ void LyricSyncEditor::paintTapStage (juce::Graphics& g, juce::Rectangle<float> a
     float mainW = area.getWidth() - 80.0f;
 
     // 列表挪进侧栏后不再挤占舞台，主内容铺满
-    const bool listInSide = (! v && railWidth() > 60.0f);
+    const bool listInSide = (! v && railOpenNow());
 
     if (! v && hasList && ! listInSide)
         mainW = rows[0].getX() - mainX - 24.0f;
@@ -4189,23 +4206,24 @@ void LyricSyncEditor::timerCallback()
 
     watchSearchTimeout (now);
 
-    // 侧栏收起/展开的滑动动画：宽度向目标值缓动，每帧重排 + 重算可见性
+    // 侧栏收起/展开：时间基准的三次缓出，比逐帧指数逼近更顺滑
     if (orientation == Orientation::horizontal && railAnimWidth >= 0.0f)
     {
         const float target = sidebarCollapsed ? 40.0f : 248.0f;
-        const float diff   = target - railAnimWidth;
+        const double t = juce::jlimit (0.0, 1.0,
+            (juce::Time::getMillisecondCounterHiRes() - railAnimStartMs) / 320.0);
+        const float eased = 1.0f - static_cast<float> ((1.0 - t) * (1.0 - t) * (1.0 - t));
 
-        if (std::abs (diff) > 0.5f)
+        railAnimWidth = railAnimFrom + (target - railAnimFrom) * eased;
+
+        updateVisibility();
+        resized();
+        repaint();
+
+        if (t >= 1.0)
         {
-            railAnimWidth += diff * 0.30f;
-            if (std::abs (target - railAnimWidth) < 1.0f)
-                railAnimWidth = -1.0f;          // 到位：交回目标值
-            updateVisibility();
-            resized();
-        }
-        else
-        {
-            railAnimWidth = -1.0f;
+            railAnimWidth = -1.0f;          // 到位：交回目标值
+            startTimerHz (30);
         }
     }
 
@@ -4839,17 +4857,9 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    // 搜索框右侧小圆钮：从 LX Music 取当前播放歌词
-    if (e.eventComponent == this && ! editing && ! tapMode
-        && sideSearchRefresh().expanded (2.0f).contains (toLogicalPoint (e.position)))
-    {
-        startLxFetch();
-        return;
-    }
-
     // 搜索结果：点一条就直接载入
     if (e.eventComponent == this && ! editing && ! tapMode && ! searchResults.empty()
-        && (orientation == Orientation::vertical || railWidth() > 60.0f))
+        && (orientation == Orientation::vertical || railOpenNow()))
     {
         const auto p = toLogicalPoint (e.position);
         const int idx = sideResultAt (p);
@@ -5210,12 +5220,12 @@ void LyricSyncEditor::mouseWheelMove (const juce::MouseEvent& e,
     {
         const bool overStage = stageArea().transformedBy (uiTransform).contains (e.position);
         const bool overRail  = orientation == Orientation::horizontal
-                               && railWidth() > 60.0f
+                               && railOpenNow()
                                && tapListArea().transformedBy (uiTransform).contains (e.position);
 
         if (overStage || overRail)
         {
-            scrollTapList (wheel.deltaY > 0.0f ? 1 : -1);
+            scrollTapList (wheel.deltaY > 0.0f ? -1 : 1);   // 滚轮往下 = 翻到后面的句子
             return;
         }
     }
@@ -7156,7 +7166,7 @@ std::vector<int> LyricSyncEditor::tapListIndices() const
 juce::Rectangle<float> LyricSyncEditor::tapListTrack (juce::Rectangle<float> area) const
 {
     const bool v    = (orientation == Orientation::vertical);
-    const bool side = (! v && railWidth() > 60.0f);
+    const bool side = (! v && railOpenNow());
     const int  maxRows = v ? 4 : 7;
     const auto ids = tapListIndices();
 
@@ -7257,7 +7267,7 @@ void LyricSyncEditor::scrollTapList (int deltaRows)
 /** 打轴列表区域：横版侧栏展开时放进侧栏中部（用户指定的位置）；竖版/收起态仍在舞台。 */
 juce::Rectangle<float> LyricSyncEditor::tapListArea() const
 {
-    if (orientation == Orientation::horizontal && railWidth() > 60.0f)
+    if (orientation == Orientation::horizontal && railOpenNow())
     {
         const float rail = railWidth();
 
@@ -7282,7 +7292,7 @@ std::vector<juce::Rectangle<float>> LyricSyncEditor::tapListRows (juce::Rectangl
         return rows;
 
     const bool  v    = (orientation == Orientation::vertical);
-    const bool  side = (! v && railWidth() > 60.0f);
+    const bool  side = (! v && railOpenNow());
     const float rowH = v ? 24.0f : (side ? 42.0f : 27.0f);
 
     // 侧栏展开时忽略传进来的舞台区域，直接用侧栏中部
