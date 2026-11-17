@@ -102,13 +102,17 @@ private:
 
     void handleClient (juce::StreamingSocket& client)
     {
-        // accept 后数据往往晚几毫秒才到，立刻读会读到空包；
-        // 循环读到「完整请求头」（\r\n\r\n）或 1.5s 超时为止
+        // accept 后数据往往晚几毫秒才到；而且浏览器会开「预连接」
+        // （只连不发数据）——直接 read 会永久阻塞，把线程池耗尽。
+        // 所以用 waitUntilReady 等数据：1.5s 内没数据的连接直接关闭。
         juce::String request;
         const double deadline = juce::Time::getMillisecondCounterHiRes() + 1500.0;
 
         while (juce::Time::getMillisecondCounterHiRes() < deadline)
         {
+            if (client.waitUntilReady (true, 100) != 1)
+                continue;                      // 100ms 内没数据，循环看 deadline
+
             char buf[1024] = {};
             const int n = client.read (buf, sizeof (buf) - 1, false);
 
@@ -117,13 +121,10 @@ private:
 
             if (request.contains ("\r\n\r\n"))
                 break;
-
-            if (n <= 0)
-                juce::Thread::sleep (10);
         }
 
         if (request.isEmpty())
-            return;
+            return;                            // 预连接 / 空连接：丢弃
 
         const juce::String head (request);
 
@@ -175,11 +176,11 @@ private:
 body{margin:0;height:100vh;background:#08080a;color:#a1a1aa;
 font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
 display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
-#brand{position:fixed;top:16px;left:20px;font-size:14px;color:#3e3e46;letter-spacing:.2px}
-#prev,#next{font-size:24px;color:#3e3e46;margin:18px 0;max-width:90vw;text-align:center;
+#brand{position:fixed;top:16px;left:20px;font-size:14px;color:#8a8a95;letter-spacing:.2px}
+#prev,#next{font-size:24px;color:#6e6e78;margin:18px 0;max-width:90vw;text-align:center;
 white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#status{position:fixed;top:16px;right:20px;font-size:12px;color:#3e3e46}
-#cur{font-size:7vw;font-weight:600;color:#63636d;margin:24px 0;max-width:92vw;
+#status{position:fixed;top:16px;right:20px;font-size:12px;color:#8a8a95}
+#cur{font-size:7vw;font-weight:600;color:#9a9aa5;margin:24px 0;max-width:92vw;
 text-align:center;line-height:1.5}
 #cur span.on{color:#f2f2f4}
 </style></head><body><div id="brand">&#9679; LyricSync</div>
@@ -203,7 +204,21 @@ function render(t){
        nx=document.getElementById('next');
  let cur=-1;
  for(let i=0;i<lines.length;i++) if(lines[i].t<=t+0.02) cur=i;
- if(cur<0){el.textContent=lines.length?'还没开始唱…':'等待歌词…';return;}
+ if(cur<0){
+  if(lines.length){
+   // 还没开播：直接显示第一句（灰字），播放到它时逐字点亮
+   el.innerHTML='';
+   for(const ch of lines[0].text){
+    const sp=document.createElement('span');sp.textContent=ch;el.appendChild(sp);
+   }
+   pv.textContent='';
+   nx.textContent=lines.length>1?lines[1].text:'';
+   st.textContent='等待播放开始 · 共 '+lines.length+' 句';
+  }else{
+   el.textContent='等待歌词…';
+  }
+  return;
+ }
  if(cur!==pi){
   pi=cur;
   el.innerHTML='';
