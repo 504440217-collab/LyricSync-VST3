@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.3.8";
+    const char* const kVersion = "2.3.9";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -2207,7 +2207,7 @@ void LyricSyncEditor::paint (juce::Graphics& g)
         g.drawImage (customBg, juce::Rectangle<float> ((bounds.getWidth() - iw) * 0.5f,
                                                        (bounds.getHeight() - ih) * 0.5f, iw, ih));
 
-        g.setColour (palette.bgTop.withAlpha (0.68f));
+        g.setColour (palette.bgTop.withAlpha (0.40f));   // 自定义皮肤：压暗层减淡，图片更透
         g.fillAll();
     }
     else
@@ -2678,6 +2678,9 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
 
     const bool lightTheme = palette.text.getPerceivedBrightness() < 0.5f;
     const auto sideBg   = lightTheme ? juce::Colour (0xfff2f4f8) : juce::Colour (0xff0e0e11);
+    // 自定义皮肤：侧栏/顶栏/dock 底色半透明，能看到后面的自定义图片
+    const auto sideBgFill = (skinIndex == 5 && customBg.isValid())
+                              ? sideBg.withAlpha (0.72f) : sideBg;
     const auto lineCol  = lightTheme ? juce::Colour (0xffd4dbea) : juce::Colour (0xff232327);
     const auto txt2     = lightTheme ? juce::Colour (0xff5d6883) : juce::Colour (0xffa1a1aa);
     const auto txt3     = lightTheme ? juce::Colour (0xff98a2b8) : juce::Colour (0xff63636d);
@@ -2690,7 +2693,7 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
     if (vertical)
     {
         // ---- 顶栏 0..92 ----
-        g.setColour (sideBg);
+        g.setColour (sideBgFill);
         g.fillRect (juce::Rectangle<float> (0.0f, 0.0f, baseW(), 92.0f));
         g.setColour (lineCol);
         g.drawLine (0.0f, 91.5f, baseW(), 91.5f, 1.0f);
@@ -2714,7 +2717,7 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
         {
             if (tapMode)
             {
-                g.setColour (sideBg);
+                g.setColour (sideBgFill);
                 g.fillRect (juce::Rectangle<float> (0.0f, 552.0f, baseW(), baseH() - 552.0f));
                 g.setColour (lineCol);
                 g.drawLine (0.0f, 552.5f, baseW(), 552.5f, 1.0f);
@@ -2723,7 +2726,7 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
         }
 
         // ---- 底部 dock 745..900 ----
-        g.setColour (sideBg);
+        g.setColour (sideBgFill);
         g.fillRect (juce::Rectangle<float> (0.0f, 745.0f, baseW(), baseH() - 745.0f));
         g.setColour (lineCol);
         g.drawLine (0.0f, 745.5f, baseW(), 745.5f, 1.0f);
@@ -2772,7 +2775,7 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
         return;
     }
 
-    g.setColour (sideBg);
+    g.setColour (sideBgFill);
     g.fillRect (juce::Rectangle<float> (0.0f, 0.0f, railW, baseH()));
 
     g.setColour (lineCol);
@@ -2934,7 +2937,10 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
     if (darkSkin)
     {
         // 深色：舞台就是一块比画布更黑的平面，没有卡片、没有描边、没有光晕
-        g.setColour (juce::Colour (0xff030304));
+        // 自定义皮肤时用半透明黑，能看到背后的自定义图片
+        g.setColour (skinIndex == 5 && customBg.isValid()
+                         ? juce::Colours::black.withAlpha (0.30f)
+                         : juce::Colour (0xff030304));
         g.fillRect (area);
     }
     else
