@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.1.2";
+    const char* const kVersion = "2.1.3";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -2294,9 +2294,12 @@ void LyricSyncEditor::paintHeader (juce::Graphics& g)
 
 juce::Rectangle<float> LyricSyncEditor::railIconRect (int index) const
 {
+    // 左下角一列 4 个：设置 / 画笔 / 导出 / 投屏（从上到下）
     const float x = (railWidth() - 30.0f) * 0.5f;
+    const float y = baseH() - 14.0f - 30.0f
+                  - static_cast<float> (3 - index) * 36.0f;
 
-    return { x, 54.0f + static_cast<float> (index) * 36.0f, 30.0f, 30.0f };
+    return { x, y, 30.0f, 30.0f };
 }
 
 int LyricSyncEditor::railIconAt (juce::Point<float> logical) const
@@ -2304,23 +2307,23 @@ int LyricSyncEditor::railIconAt (juce::Point<float> logical) const
     if (! sidebarCollapsed || orientation != Orientation::horizontal)
         return -1;
 
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < 4; ++i)
         if (railIconRect (i).expanded (2.0f).contains (logical))
             return i;
 
     return -1;
 }
 
-/** 收起态那一列：载入 / 编辑 / 着色 / 导出 / 设置，纯 Path，不依赖字体。 */
+/** 收起态左下角那一列：设置 / 画笔 / 导出 / 投屏，纯 Path，不依赖字体。 */
 void LyricSyncEditor::paintRailIcons (juce::Graphics& g)
 {
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < 4; ++i)
     {
         const auto r = railIconRect (i);
         const float cx = r.getCentreX();
         const float cy = r.getCentreY();
 
-        const bool active = (i == 2 && annotateMode);
+        const bool active = (i == 1 && annotateMode) || (i == 0 && settingsOpen);
 
         g.setColour (active ? palette.accent.withAlpha (0.14f)
                             : palette.text.withAlpha (0.04f));
@@ -2333,51 +2336,8 @@ void LyricSyncEditor::paintRailIcons (juce::Graphics& g)
         }
 
         g.setColour (active ? palette.accent : palette.dim);
-        g.setFont (uiFont (11.0f));
 
-        if (i == 0 || i == 3)
-        {
-            // 载入 = 箭头向下进托盘；导出 = 箭头向上出托盘
-            const float dir = (i == 0) ? 1.0f : -1.0f;
-            const float sx = cx, sy = cy - 6.0f * dir;
-
-            juce::Path p;
-            p.startNewSubPath (sx, sy);
-            p.lineTo (sx, sy + 7.0f * dir);
-            p.startNewSubPath (sx - 3.2f, sy + 4.2f * dir);
-            p.lineTo (sx, sy + 7.2f * dir);
-            p.lineTo (sx + 3.2f, sy + 4.2f * dir);
-            p.startNewSubPath (cx - 5.5f, cy + 3.4f);
-            p.lineTo (cx - 5.5f, cy + 6.0f);
-            p.lineTo (cx + 5.5f, cy + 6.0f);
-            p.lineTo (cx + 5.5f, cy + 3.4f);
-
-            g.strokePath (p, juce::PathStrokeType (1.3f,
-                            juce::PathStrokeType::curved,
-                            juce::PathStrokeType::rounded));
-        }
-        else if (i == 1)
-        {
-            // 编辑 = 三行文字（歌词文本）
-            juce::Path p;
-
-            for (int k = 0; k < 3; ++k)
-            {
-                const float w = (k == 2) ? 4.0f : 5.5f;
-                p.startNewSubPath (cx - 5.5f, cy - 4.4f + static_cast<float> (k) * 4.4f);
-                p.lineTo (cx + (k == 2 ? -1.5f : w), cy - 4.4f + static_cast<float> (k) * 4.4f);
-            }
-
-            g.strokePath (p, juce::PathStrokeType (1.3f,
-                            juce::PathStrokeType::curved,
-                            juce::PathStrokeType::rounded));
-        }
-        else if (i == 2)
-        {
-            drawBrushIcon (g, r.withSizeKeepingCentre (17.0f, 17.0f),
-                           active ? palette.accent : palette.dim);
-        }
-        else
+        if (i == 0)
         {
             // 设置 = 齿轮
             juce::Path p;
@@ -2387,8 +2347,6 @@ void LyricSyncEditor::paintRailIcons (juce::Graphics& g)
             p.clear();
             p.addEllipse (cx - 5.2f, cy - 5.2f, 10.4f, 10.4f);
             g.strokePath (p, juce::PathStrokeType (1.2f));
-
-            g.setColour ((i == 4) ? (active ? palette.accent : palette.dim) : palette.dim);
 
             juce::Path ticks;
 
@@ -2406,6 +2364,50 @@ void LyricSyncEditor::paintRailIcons (juce::Graphics& g)
             }
 
             g.strokePath (ticks, juce::PathStrokeType (1.2f,
+                            juce::PathStrokeType::curved,
+                            juce::PathStrokeType::rounded));
+        }
+        else if (i == 1)
+        {
+            // 画笔（着色工具）
+            drawBrushIcon (g, r.withSizeKeepingCentre (17.0f, 17.0f),
+                           active ? palette.accent : palette.dim);
+        }
+        else if (i == 2)
+        {
+            // 导出 = 箭头向上出托盘
+            const float sx = cx, sy = cy + 6.0f;
+
+            juce::Path p;
+            p.startNewSubPath (sx, sy);
+            p.lineTo (sx, sy - 7.0f);
+            p.startNewSubPath (sx - 3.2f, sy - 4.2f);
+            p.lineTo (sx, sy - 7.2f);
+            p.lineTo (sx + 3.2f, sy - 4.2f);
+            p.startNewSubPath (cx - 5.5f, cy + 3.4f);
+            p.lineTo (cx - 5.5f, cy + 6.0f);
+            p.lineTo (cx + 5.5f, cy + 6.0f);
+            p.lineTo (cx + 5.5f, cy + 3.4f);
+
+            g.strokePath (p, juce::PathStrokeType (1.3f,
+                            juce::PathStrokeType::curved,
+                            juce::PathStrokeType::rounded));
+        }
+        else
+        {
+            // 投屏 = 显示器：屏幕矩形 + 底座
+            juce::Path p;
+            p.addRoundedRectangle (cx - 6.0f, cy - 5.5f, 12.0f, 8.5f, 1.6f);
+            g.strokePath (p, juce::PathStrokeType (1.3f,
+                            juce::PathStrokeType::curved,
+                            juce::PathStrokeType::rounded));
+
+            juce::Path stand;
+            stand.startNewSubPath (cx, cy + 3.0f);
+            stand.lineTo (cx, cy + 6.0f);
+            stand.startNewSubPath (cx - 3.4f, cy + 6.4f);
+            stand.lineTo (cx + 3.4f, cy + 6.4f);
+            g.strokePath (stand, juce::PathStrokeType (1.3f,
                             juce::PathStrokeType::curved,
                             juce::PathStrokeType::rounded));
         }
@@ -4797,11 +4799,10 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
         {
             switch (icon)
             {
-                case 0:  loadButton.triggerClick();     break;
-                case 1:  pasteButton.triggerClick();    break;
-                case 2:  annotateButton.triggerClick(); break;
-                case 3:  exportButton.triggerClick();   break;
-                default: gearButton.triggerClick();     break;
+                case 0:  gearButton.triggerClick();     break;   // 设置
+                case 1:  annotateButton.triggerClick(); break;   // 画笔（着色）
+                case 2:  exportButton.triggerClick();   break;   // 导出
+                default: castButton.triggerClick();     break;   // 投屏
             }
 
             return;
@@ -5034,7 +5035,7 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
                 const float centre = p.y - track.getY() - thumb.getHeight() * 0.5f;
                 const float t01 = juce::jlimit (0.0f, 1.0f, centre / usable);
                 tapListScroll = juce::jlimit (0, maxScroll,
-                    juce::roundToInt ((1.0f - t01) * static_cast<float> (maxScroll)));
+                    juce::roundToInt (t01 * static_cast<float> (maxScroll)));
             }
 
             tapListDragging = true;
@@ -5122,8 +5123,8 @@ void LyricSyncEditor::mouseDrag (const juce::MouseEvent& e)
         const int maxScroll = tapListMaxScroll();
         const float usable = juce::jmax (1.0f, track.getHeight() - thumb.getHeight());
 
-        // 往上拖 = 往回翻旧句子；位移换算成「行」
-        const float deltaRows = (tapDragStartY - p.y) / usable
+        // 往下拖 = 翻到后面的句子；位移换算成「行」
+        const float deltaRows = (p.y - tapDragStartY) / usable
                               * static_cast<float> (maxScroll);
         const int next = juce::jlimit (0, maxScroll,
             juce::roundToInt (static_cast<float> (tapDragStartScroll) + deltaRows));
@@ -5204,12 +5205,19 @@ void LyricSyncEditor::mouseWheelMove (const juce::MouseEvent& e,
         return;
     }
 
-    // 打轴界面：滚轮直接翻「已记录」列表（不按住 Ctrl）
-    if (tapMode && tapEditIndex < 0 && ! mod && e.eventComponent == this
-        && stageArea().transformedBy (uiTransform).contains (e.position))
+    // 打轴界面：滚轮直接翻「已记录」列表（不按住 Ctrl）；侧栏展开时列表在侧栏里
+    if (tapMode && tapEditIndex < 0 && ! mod && e.eventComponent == this)
     {
-        scrollTapList (wheel.deltaY > 0.0f ? 1 : -1);
-        return;
+        const bool overStage = stageArea().transformedBy (uiTransform).contains (e.position);
+        const bool overRail  = orientation == Orientation::horizontal
+                               && railWidth() > 60.0f
+                               && tapListArea().transformedBy (uiTransform).contains (e.position);
+
+        if (overStage || overRail)
+        {
+            scrollTapList (wheel.deltaY > 0.0f ? 1 : -1);
+            return;
+        }
     }
 
     // 内联搜索结果：滚轮翻页（不按住 Ctrl，也不需要点进面板）
@@ -6748,14 +6756,15 @@ void LyricSyncEditor::armTapLine (int index)
         const int  maxRows = v ? 4 : 7;
         const int  n = static_cast<int> (ids.size());
 
-        tapListScroll = 0;
-
         for (int p = 0; p < n; ++p)
         {
             if (ids[(size_t) p] == index)
             {
-                if (p < n - maxRows)
-                    tapListScroll = n - maxRows - p;
+                // 窗口从第一句往下排，只把目标行滚进可见范围，不重置位置
+                if (p < tapListScroll)
+                    tapListScroll = p;
+                else if (p >= tapListScroll + maxRows && n > maxRows)
+                    tapListScroll = juce::jlimit (0, n - maxRows, p - maxRows + 1);
 
                 break;
             }
@@ -7136,10 +7145,10 @@ std::vector<int> LyricSyncEditor::tapListIndices() const
     if (n <= maxRows)
         return ids;
 
-    // 从最新一行往回翻 tapListScroll 行
+    // 从第一句开始从上往下排；tapListScroll 是窗口起始偏移（0 = 顶部）
     const int scroll = juce::jlimit (0, n - maxRows, tapListScroll);
-    const int end    = n - scroll;
-    const int begin  = juce::jmax (0, end - maxRows);
+    const int begin  = scroll;
+    const int end    = juce::jmin (n, begin + maxRows);
 
     return std::vector<int> (ids.begin() + begin, ids.begin() + end);
 }
@@ -7196,7 +7205,7 @@ juce::Rectangle<float> LyricSyncEditor::tapListThumb (juce::Rectangle<float> are
     const float frac = juce::jlimit (0.15f, 1.0f,
                                      static_cast<float> (maxRows) / static_cast<float> (total));
     const float thumbH = juce::jmax (20.0f, track.getHeight() * frac);
-    const float t01 = 1.0f - static_cast<float> (tapListScroll) / static_cast<float> (maxScroll);
+    const float t01 = static_cast<float> (tapListScroll) / static_cast<float> (maxScroll);
     const float thumbY = track.getY()
                        + (track.getHeight() - thumbH) * juce::jlimit (0.0f, 1.0f, t01);
 
