@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.3.1";
+    const char* const kVersion = "2.3.2";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -3527,6 +3527,13 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
     //---- 已记录列表（可点，点一行就从那一句重打）-------------------------
     const auto ids = tapListIndices();
 
+    // 播放头所在的那一句：最后一个「时间 <= displayTime」的已记录行
+    int currentLine = -1;
+
+    for (int i = 0; i < static_cast<int> (tapTimes.size()); ++i)
+        if (tapTimes[(size_t) i] >= 0.0 && tapTimes[(size_t) i] <= displayTime + 0.001)
+            currentLine = i;
+
     if (! rows.empty())
     {
 
@@ -3546,7 +3553,7 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
 
             const bool thisEditing = (li == tapEditIndex);
             const bool thisSel     = (li == tapListSelected && ! thisEditing);
-            const bool thisCurrent = (li == tapIndex - 1 && tapIndex > 0 && ! thisEditing);
+            const bool thisCurrent = (li == currentLine && ! thisEditing);
 
             g.setColour (thisEditing ? palette.accent.withAlpha (0.10f)
                        : thisSel     ? palette.accent.withAlpha (0.16f)
@@ -4365,6 +4372,21 @@ void LyricSyncEditor::timerCallback()
 
         tapFollowTime = displayTime;
 
+        // 列表跟随播放头：正在唱的那一句始终保持在可见窗口里
+        // （用户手动滚过列表后暂停 4 秒，不去抢他的位置）
+        if (! tapListDragging
+            && juce::Time::getMillisecondCounterHiRes() > tapListHoldUntilMs)
+        {
+            int playingLine = -1;
+
+            for (int i = 0; i < static_cast<int> (tapTimes.size()); ++i)
+                if (tapTimes[(size_t) i] >= 0.0 && tapTimes[(size_t) i] <= displayTime + 0.001)
+                    playingLine = i;
+
+            if (playingLine >= 0)
+                keepTapRowVisible (playingLine);
+        }
+
         const auto want = tr (processor.isPlaying.load() ? Lang::TextId::tapHostPause
                                                          : Lang::TextId::tapHostPlay);
 
@@ -5165,6 +5187,7 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
             }
 
             tapListDragging = true;
+            tapListHoldUntilMs = juce::Time::getMillisecondCounterHiRes() + 4000.0;
             tapDragStartY = p.y;
             tapDragStartScroll = tapListScroll;
             setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
@@ -5177,14 +5200,26 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
             if (! rows[(size_t) i].contains (p))
                 continue;
 
-            // 点右侧的环形箭头 = 预备重打这一句；点行本身 = 选中这一句（双击才编辑）
+            // 点右侧的环形箭头 = 预备重打这一句
             if (tapRowArmButton (rows[(size_t) i]).contains (p))
             {
                 armTapLine (ids[(size_t) i]);
                 return;
             }
 
-            tapListSelected = ids[(size_t) i];
+            // 同一行 500ms 内再点一次 = 双击 → 进入编辑（比 JUCE 双击判定更宽容）
+            const double nowMs = juce::Time::getMillisecondCounterHiRes();
+
+            if (tapListSelected == ids[(size_t) i]
+                && nowMs - tapListLastClickMs < 500.0)
+            {
+                tapListLastClickMs = 0.0;
+                editTapRow (ids[(size_t) i]);
+                return;
+            }
+
+            tapListSelected = ids[(size_t) i];   // 单击 = 选中
+            tapListLastClickMs = nowMs;
             repaint();
             return;
         }
@@ -6929,23 +6964,7 @@ void LyricSyncEditor::armTapLine (int index)
             if (tapTimes[(size_t) i] >= 0.0)
                 ids.push_back (i);
 
-        const bool v = (orientation == Orientation::vertical);
-        const int  maxRows = v ? 4 : 7;
-        const int  n = static_cast<int> (ids.size());
-
-        for (int p = 0; p < n; ++p)
-        {
-            if (ids[(size_t) p] == index)
-            {
-                // 窗口从第一句往下排，只把目标行滚进可见范围，不重置位置
-                if (p < tapListScroll)
-                    tapListScroll = p;
-                else if (p >= tapListScroll + maxRows && n > maxRows)
-                    tapListScroll = juce::jlimit (0, n - maxRows, p - maxRows + 1);
-
-                break;
-            }
-        }
+        keepTapRowVisible (index);
     }
 
     // 手动预览：可以真的倒回 3 秒并停住，按播放就能顺着唱到这一句
@@ -7404,9 +7423,38 @@ void LyricSyncEditor::syncTapToPlayhead (double t)
     if (target != tapIndex)
     {
         tapIndex = target;
-        tapListScroll = 0;
         lastWarning = {};
+        keepTapRowVisible (target);     // 列表跟随，不再跳回顶部
         repaint();
+    }
+}
+
+/** 让 lineId 对应的行保持在列表可见窗口里（跟随播放头 / 预备重打共用）。 */
+void LyricSyncEditor::keepTapRowVisible (int lineId)
+{
+    std::vector<int> ids;
+
+    for (int i = 0; i < static_cast<int> (tapTimes.size()); ++i)
+        if (tapTimes[(size_t) i] >= 0.0)
+            ids.push_back (i);
+
+    const bool v = (orientation == Orientation::vertical);
+    const int  maxRows = v ? 4 : 7;
+    const int  n = static_cast<int> (ids.size());
+    const int  maxScroll = juce::jmax (0, n - maxRows);
+
+    for (int p = 0; p < n; ++p)
+    {
+        if (ids[(size_t) p] != lineId)
+            continue;
+
+        if (p < tapListScroll)
+            tapListScroll = p;
+        else if (p >= tapListScroll + maxRows && n > maxRows)
+            tapListScroll = juce::jlimit (0, maxScroll, p - maxRows + 1);
+
+        repaint();
+        break;
     }
 }
 
@@ -7427,6 +7475,7 @@ void LyricSyncEditor::scrollTapList (int deltaRows)
     if (next != tapListScroll)
     {
         tapListScroll = next;
+        tapListHoldUntilMs = juce::Time::getMillisecondCounterHiRes() + 4000.0;
         repaint();
     }
 }

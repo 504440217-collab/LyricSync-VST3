@@ -201,6 +201,7 @@ private:
     void paintStage  (juce::Graphics& g, juce::Rectangle<float> area);
     void paintTapStage (juce::Graphics& g, juce::Rectangle<float> area);
     void paintTapList (juce::Graphics& g, const juce::Rectangle<float>& area, bool listInSide);
+    void keepTapRowVisible (int lineId);                 // 让某行保持在列表可见窗口里
     void paintSettings (juce::Graphics& g, juce::Rectangle<float> panel);
     void paintAbout    (juce::Graphics& g, juce::Rectangle<float> panel);
     void paintSearch   (juce::Graphics& g, juce::Rectangle<float> panel);
@@ -469,6 +470,8 @@ private:
     int  tapEditIndex = -1;               // >=0 表示正在编辑某一行
     int  tapListSelected = -1;            // 单击选中的已记录行（双击才进编辑）
     bool tapStagePress = false;           // 舞台按下，抬起时判定「点击打轴 / 拖动翻看」
+    double tapListHoldUntilMs = 0.0;      // 手动滚动列表后暂停跟随的截止时间
+    double tapListLastClickMs = 0.0;      // 上一击列表行的时间（自判双击用）
     juce::Point<float> tapStagePressPos;
     int  tapStagePressLine = -1;          // 按下时命中的歌词行
     int  tapArmIndex = -1;                // >=0 表示已预备重打第 N 句，下一次打点只写这一句
