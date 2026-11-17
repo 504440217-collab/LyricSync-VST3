@@ -65,6 +65,8 @@ namespace Lang
         tapDoneLabel,
         tapUndo,
         tapRestart,
+        tapRestampAll,
+        tipTapRestampAll,
         tapNudgeBack,
         tapNudgeFwd,
         tapPause,

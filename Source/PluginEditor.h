@@ -529,6 +529,7 @@ private:
     juce::TextButton  tapNudgeFwdButton;
     juce::TextButton  tapPauseButton;
     juce::TextButton  tapHostTransportButton;   // 同步宿主播放/暂停
+    juce::TextButton  tapRestampAllButton;            // 重打全部：整首时间轴归零从头打
     juce::TextButton  tapRowRestampButton;
     juce::TextButton  tapRowApplyButton;
     juce::TextButton  tapRowCancelButton;

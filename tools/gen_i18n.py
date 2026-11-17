@@ -90,6 +90,8 @@ TABLE = [
     ("tapDoneLabel",     "打轴结果", "Tap timing result"),
     ("tapUndo",          "撤销", "Undo"),
     ("tapRestart",       "重打本句", "Redo line"),
+    ("tapRestampAll",    "重打全部", "Restamp all"),
+    ("tipTapRestampAll", "把本首歌词全部时间轴归零，从头重新打", "Reset all timings and re-tap from the top"),
     ("tapNudgeBack",     "-10 ms", "-10 ms"),
     ("tapNudgeFwd",      "+10 ms", "+10 ms"),
     ("tapPause",         "暂停", "Pause"),
