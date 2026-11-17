@@ -76,7 +76,9 @@ TABLE = [
 
     #--- 打轴（Tap timing） -------------------------------------------------
     ("tapStart",         "开始打轴", "Tap Timing"),
-    ("tapRecordThis",    "记录本句", "Stamp"),
+    ("tapRecordThis",    "记录本句（空格）", "Stamp this line (Space)"),
+    ("padLineCounterPrefix", "第 ", "Line "),
+    ("padListHeader", "时间码 · 文字（可直接点改）", "Time · text (click to edit)"),
     ("tapTitle",         "编辑歌词", "EDIT LYRICS"),
     ("tapHint",          "播放到这一句开始时：点击画面空白处，或按空格",
                          "When this line starts: click the stage, or press Space"),
@@ -293,6 +295,7 @@ TABLE = [
     ("zenExit",      "双击返回", "Double-click to exit"),
     ("bpmPrefix",    "测速 ", "Tempo "),
     ("retempo",      "重新测速", "Re-detect"),
+    ("retempoShort", "测速", "Tempo"),
     ("tipRetempo",   "清空已采集的音频，重新分析节拍（播放 10 秒以上最准）",
                      "Discard the captured audio and analyse the tempo again (best after 10 s of playback)"),
     ("wordFormat",   "Word 文档", "Word document"),

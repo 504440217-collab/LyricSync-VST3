@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.0.9";
+    const char* const kVersion = "2.1.0";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -215,6 +215,20 @@ namespace
         seconds = juce::jmax (0.0, seconds);
         const int total = static_cast<int> (std::lround (seconds));
         return juce::String::formatted ("%d:%02d", total / 60, total % 60);
+    }
+
+    /** HUD 时间码：当前位置带 1 位小数（mm:ss.s），总时长取整（mm:ss）。 */
+    juce::String formatHudTime (double seconds, bool withTenths)
+    {
+        seconds = juce::jmax (0.0, seconds);
+        const int mins = static_cast<int> (seconds / 60.0);
+        const double secs = seconds - static_cast<double> (mins) * 60.0;
+
+        if (withTenths)
+            return juce::String::formatted ("%02d:%04.1f", mins, secs);
+
+        const int whole = static_cast<int> (std::lround (secs)) % 60;
+        return juce::String::formatted ("%02d:%02d", mins, whole);
     }
 
     /** LRC timestamp: mm:ss.xx */
@@ -1310,9 +1324,10 @@ void LyricSyncEditor::updateVisibility()
     demoPlayButton  .setVisible (false);
     demoStopButton  .setVisible (false);
 
-    setStartButton   .setVisible (normal);
-    undoSetStartButton.setVisible (normal);
-    annotateButton   .setVisible (normal);
+    // 收起侧栏时这三个文字按钮一起隐藏；收起态的等价入口由 paintRailIcons 画图标
+    setStartButton   .setVisible (normal && railOpen);
+    undoSetStartButton.setVisible (normal && railOpen);
+    annotateButton   .setVisible (normal && railOpen);
     standalonePlayButton.setVisible (normal && standaloneMode);
 
     // 样式卡片
@@ -1839,33 +1854,48 @@ void LyricSyncEditor::resized()
         }
         else if (tapMode)
         {
-            float tx = stage.getX();
-
-            auto put = [&] (juce::Component& c, float w2)
-            {
-                c.setBounds (scaledRect (tx, bottom - 78.0f, w2, 28.0f));
-                tx += w2 + 6.0f;
-            };
-
-            // 侧栏展开时「记录本句」放侧栏底部；收起后才挤进舞台按钮行
             if (railWidth() > 60.0f)
             {
-                padStampButton.setBounds (scaledRect (12.0f, baseH() - 66.0f,
-                                                      railWidth() - 24.0f, 30.0f));
+                // 设计稿 pad-panel：全部按钮都在侧栏，两列并排
+                const float sx  = 12.0f;
+                const float sw  = railWidth() - 24.0f;
+                const float half = (sw - 4.0f) * 0.5f;
+                const float btnH = 26.0f;
+
+                padStampButton.setBounds (scaledRect (sx, 60.0f, sw, 30.0f));
+
+                tapUndoButton     .setBounds (scaledRect (sx, 96.0f, half, btnH));
+                tapRestartButton  .setBounds (scaledRect (sx + half + 4.0f, 96.0f, half, btnH));
+                tapNudgeBackButton.setBounds (scaledRect (sx, 128.0f, half, btnH));
+                tapNudgeFwdButton .setBounds (scaledRect (sx + half + 4.0f, 128.0f, half, btnH));
+                tapHostTransportButton.setBounds (scaledRect (sx, 160.0f, half, btnH));
+                tapPauseButton    .setBounds (scaledRect (sx + half + 4.0f, 160.0f, half, btnH));
+
+                // 退出 / 完成 落在侧栏底部
+                tapExitButton .setBounds (scaledRect (sx, baseH() - 62.0f, half, 28.0f));
+                tapFinishButton.setBounds (scaledRect (sx + half + 4.0f, baseH() - 62.0f, half, 28.0f));
             }
             else
             {
-                put (padStampButton, 96.0f);
-            }
+                // 收起态：侧栏没有空间，维持舞台底部一行
+                float tx = stage.getX();
 
-            put (tapUndoButton, 74.0f);
-            put (tapRestartButton, 96.0f);
-            put (tapNudgeBackButton, 62.0f);
-            put (tapNudgeFwdButton, 62.0f);
-            put (tapHostTransportButton, 92.0f);
-            put (tapPauseButton, 84.0f);
-            put (tapFinishButton, 84.0f);
-            put (tapExitButton, 74.0f);
+                auto put = [&] (juce::Component& c, float w2)
+                {
+                    c.setBounds (scaledRect (tx, bottom - 78.0f, w2, 28.0f));
+                    tx += w2 + 6.0f;
+                };
+
+                put (padStampButton, 96.0f);
+                put (tapUndoButton, 74.0f);
+                put (tapRestartButton, 96.0f);
+                put (tapNudgeBackButton, 62.0f);
+                put (tapNudgeFwdButton, 62.0f);
+                put (tapHostTransportButton, 92.0f);
+                put (tapPauseButton, 84.0f);
+                put (tapFinishButton, 84.0f);
+                put (tapExitButton, 74.0f);
+            }
         }
 
         fileLabel .setBounds (scaledRect (stage.getX(), 32.0f, stage.getWidth() - 8.0f, 16.0f));
@@ -2646,46 +2676,45 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
     g.setColour (lineCol);
     g.drawLine (railW - 0.5f, 0.0f, railW - 0.5f, baseH(), 1.0f);
 
-    //---- 编辑歌词：侧栏换成打轴面板的头 + 操作说明 ------------------------
+    //---- 编辑歌词（设计稿 pad-panel）：品牌 + 模式标题 + 操作按钮 + 列表 --------
     if (wide && tapMode)
     {
         g.setColour (palette.accent);
-        g.fillRoundedRectangle (12.0f, 14.0f, 7.0f, 7.0f, 3.5f);
+        g.fillEllipse (14.0f, 15.0f, 7.0f, 7.0f);
 
-        drawText (g, juce::Rectangle<float> (27.0f, 10.0f, 140.0f, 18.0f),
+        drawText (g, juce::Rectangle<float> (27.0f, 11.0f, 130.0f, 18.0f),
                   "LyricSync", 13.0f, palette.text, false, -1, {}, 1.0f,
                   juce::Justification::centredLeft);
 
-        const float barY = 44.0f;
+        g.setColour (txt3);
+        g.setFont (uiFont (10.5f));
+        g.drawText (juce::String ("v") + kVersion,
+                    juce::Rectangle<float> (railW - 100.0f, 12.0f, 88.0f, 16.0f),
+                    juce::Justification::centredRight, false);
 
+        // mode-head：左侧强调竖条 + 「编辑歌词」+ 右侧「第 x / y 句」
+        const float barY = 40.0f;
         g.setColour (palette.accent);
         g.fillRoundedRectangle (12.0f, barY, 3.0f, 18.0f, 1.5f);
 
-        drawText (g, juce::Rectangle<float> (21.0f, barY - 1.0f, 130.0f, 20.0f),
-                  tr (Lang::TextId::tapTitle), 12.0f, palette.accent, false, -1, {}, 1.0f,
+        drawText (g, juce::Rectangle<float> (21.0f, barY - 1.0f, 120.0f, 20.0f),
+                  tr (Lang::TextId::tapTitle), 12.0f, palette.accent, true, -1, {}, 1.0f,
                   juce::Justification::centredLeft);
 
         g.setColour (txt3);
         g.setFont (uiFont (10.5f));
-        g.drawText (juce::String (juce::jmin (tapIndex + 1, (int) tapLines.size()))
+        g.drawText (tr (Lang::TextId::padLineCounterPrefix)
+                      + juce::String (juce::jmin (tapIndex + 1, (int) tapLines.size()))
                       + " / " + juce::String ((int) tapLines.size()),
-                    juce::Rectangle<float> (railW - 106.0f, barY + 1.0f, 94.0f, 16.0f),
+                    juce::Rectangle<float> (railW - 120.0f, barY + 1.0f, 108.0f, 16.0f),
                     juce::Justification::centredRight, false);
 
+        // 列表标题：时间码 · 文字（可直接点改）
         g.setColour (txt3);
-        g.setFont (uiFont (10.5f));
-        g.drawFittedText (tr (Lang::TextId::tapListTitle),
-                          juce::Rectangle<float> (14.0f, 74.0f, railW - 28.0f, 32.0f)
-                              .toNearestInt(),
-                          juce::Justification::topLeft, 2, 1.0f);
-
-        g.setColour (lineCol.withAlpha (0.7f));
-        g.drawLine (12.0f, 116.0f, railW - 12.0f, 116.0f, 1.0f);
-
-        // 底部小字：空格同效（按钮本体在 resized() 里布局）
-        drawText (g, juce::Rectangle<float> (12.0f, baseH() - 84.0f, railW - 24.0f, 16.0f),
-                  tr (Lang::TextId::tapSpaceHint), 10.0f, txt3, false, -1.0f, {}, 1.0f,
-                  juce::Justification::centredLeft);
+        g.setFont (uiFont (10.0f));
+        g.drawText (tr (Lang::TextId::padListHeader),
+                    juce::Rectangle<float> (12.0f, 190.0f, railW - 24.0f, 14.0f),
+                    juce::Justification::centredLeft, false);
 
         return;
     }
@@ -3746,8 +3775,9 @@ juce::Rectangle<float> LyricSyncEditor::hudBounds() const
 {
     const auto s = stageArea();
 
-    return { s.getX() + 18.0f, s.getBottom() - 30.0f,
-             s.getWidth() - 36.0f, 24.0f };
+    // 设计稿：left 20 / right 20 / bottom 14
+    return { s.getX() + 20.0f, s.getBottom() - 38.0f,
+             s.getWidth() - 40.0f, 24.0f };
 }
 
 juce::Rectangle<float> LyricSyncEditor::hudPlayRect() const
@@ -3890,7 +3920,7 @@ void LyricSyncEditor::paintHud (juce::Graphics& g)
     }
 
     drawText (g, tcRect,
-              timecodeText (displayTime) + " / " + timecodeText (range.getEnd()),
+              formatHudTime (displayTime, true) + " / " + formatHudTime (range.getEnd(), false),
               11.0f, palette.dim, false, -1.0f, {}, 1.0f, juce::Justification::centredLeft);
 
     //---- 分隔线 ----
@@ -3908,21 +3938,17 @@ void LyricSyncEditor::paintHud (juce::Graphics& g)
     drawText (g, bpmRect, bpmText, 11.0f, palette.dim, false, -1.0f, {}, 1.0f,
               juce::Justification::centredLeft);
 
-    //---- 测速（循环箭头）----
+    //---- 测速：设计稿是文字按钮「测速」----
     {
         const auto b = hudTempoRect();
 
         g.setColour (palette.text.withAlpha (0.05f));
         g.fillRoundedRectangle (b, 6.0f);
+        g.setColour (palette.text.withAlpha (0.10f));
+        g.drawRoundedRectangle (b.reduced (0.5f), 6.0f, 1.0f);
 
-        const float cx = b.getCentreX(), cy = b.getCentreY();
-
-        // 测速 = 秒表：完整圆环 + 从中心指向右上的指针 + 顶部按钮
-        g.setColour (palette.dim);
-        g.drawEllipse (cx - 5.2f, cy - 5.2f, 10.4f, 10.4f, 1.3f);
-        g.drawLine (cx, cy, cx + 3.4f, cy - 3.0f, 1.3f);
-        g.fillEllipse (cx - 1.0f, cy - 1.0f, 2.0f, 2.0f);
-        g.drawLine (cx, cy - 5.2f, cx, cy - 7.0f, 1.2f);
+        drawText (g, b, tr (Lang::TextId::retempoShort), 10.5f, palette.dim, false,
+                  -1.0f, {}, 1.0f, juce::Justification::centred);
     }
 
     //---- 撤销（↺）----
@@ -3934,22 +3960,20 @@ void LyricSyncEditor::paintHud (juce::Graphics& g)
 
         const float cx = b.getCentreX(), cy = b.getCentreY();
 
-        // 撤销 = ↺：大缺口圆弧（开口朝上）+ 箭头落在左上
-        juce::Path arc;
-        arc.addCentredArc (cx, cy, 4.8f, 4.8f, 0.0f,
-                           juce::MathConstants<float>::pi * 0.20f,
-                           juce::MathConstants<float>::pi * 1.86f, true);
+        // 撤销：设计稿是「← 折线箭头 + 向右下弯的弧」
+        juce::Path p;
+        p.startNewSubPath (cx - 2.2f, cy - 3.0f);
+        p.lineTo (cx - 5.0f, cy);
+        p.lineTo (cx - 2.2f, cy + 3.0f);
+        p.startNewSubPath (cx - 5.0f, cy);
+        p.lineTo (cx + 1.4f, cy);
+        p.addArc (cx + 1.4f, cy + 2.8f, 2.8f, 2.8f,
+                  -juce::MathConstants<float>::pi * 0.5f, 0.0f, false);
 
         g.setColour (palette.dim);
-        g.strokePath (arc, juce::PathStrokeType (1.4f,
+        g.strokePath (p, juce::PathStrokeType (1.4f,
                         juce::PathStrokeType::curved,
                         juce::PathStrokeType::rounded));
-
-        juce::Path head;
-        head.addTriangle (cx - 5.6f, cy - 4.6f,
-                          cx - 2.0f, cy - 6.4f,
-                          cx - 3.6f, cy - 1.8f);
-        g.fillPath (head);
     }
 }
 
@@ -7179,11 +7203,11 @@ juce::Rectangle<float> LyricSyncEditor::tapListArea() const
     {
         const float rail = railWidth();
 
-        // 侧栏：标题行 y=10..30、分组标题 y=44、说明 y=74..106、分隔线 y=116
-        // 列表从 y=126 起，到「记录本句」按钮上方（按钮在 baseH-66）为止。
-        const float top    = 126.0f;
-        const float bottom = baseH() - 116.0f;
-        return { 10.0f, top, rail - 20.0f, juce::jmax (60.0f, bottom - top) };
+        // 侧栏：品牌 10..30、模式标题 36..56、记录本句 60..90、
+        // 三行操作 96..180、列表标题 186..202；列表从 206 起，到退出/完成上方为止。
+        const float top    = 206.0f;
+        const float bottom = baseH() - 76.0f;
+        return { 10.0f, top, rail - 26.0f, juce::jmax (60.0f, bottom - top) };
     }
 
     return stageArea();
