@@ -410,6 +410,7 @@ TABLE = [
     ("offsetHint",      "±100 ms", "±100 ms"),
     ("fontHint",        "Ctrl + 滚轮可微调", "Ctrl + scroll to fine-tune"),
     ("segLine",         "逐行", "By line"),
+    ("modeLabel",       "模式", "Mode"),
     ("segWord",         "逐字", "By word"),
     ("cast",            "投屏", "Cast"),
     ("castSoon",        "投屏（局域网二维码）正在做，下个版本给你",

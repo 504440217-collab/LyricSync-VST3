@@ -302,6 +302,7 @@ namespace Lang
         offsetHint,
         fontHint,
         segLine,
+        modeLabel,
         segWord,
         cast,
         castSoon,
