@@ -4,6 +4,10 @@
 #include <atomic>
 #include <memory>
 
+#if JUCE_WINDOWS
+ #include <winsock2.h>
+#endif
+
 //==============================================================================
 /**
  *  极简 HTTP 服务：为「局域网网页投屏」提供三个接口。
@@ -141,15 +145,12 @@ private:
                 break;
         }
 
-        auto logLine = [this] (const juce::String& text)
+        auto logLine = [] (const juce::String& text)
         {
-            auto f = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                         .getChildFile ("LyricSync-cast.log");
-
-            if (auto stream = f.appendText())
-                if (auto* out = stream->openedOk() ? stream.get() : nullptr)
-                    out->writeText (juce::Time::getCurrentTime().toString (false, true, true, true)
-                                    + "  " + text + "\n");
+            juce::File::getSpecialLocation (juce::File::tempDirectory)
+                .getChildFile ("LyricSync-cast.log")
+                .appendText (juce::Time::getCurrentTime().toString (false, true, true, true)
+                             + "  " + text + "\r\n", false, false, "\r\n");
         };
 
         logLine ("conn accepted=" + juce::String (acceptedCount.load())
