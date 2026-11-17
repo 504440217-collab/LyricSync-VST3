@@ -123,11 +123,21 @@ private:
        #if JUCE_WINDOWS
         {
             const auto raw = (SOCKET) (juce::pointer_sized_int) client.getRawSocketHandle();
-            DWORD timeoutMs = 1500;
 
             if (raw != INVALID_SOCKET)
+            {
+                // accept 来的 socket 可能是非阻塞的：write 会立刻返回 0/-1，
+                // 响应永远发不出去（浏览器白屏）。强制改回阻塞模式。
+                u_long mode = 0;
+                ioctlsocket (raw, FIONBIO, &mode);
+
+                DWORD recvMs = 1500;
+                DWORD sendMs = 4000;
                 setsockopt (raw, SOL_SOCKET, SO_RCVTIMEO,
-                            reinterpret_cast<const char*> (&timeoutMs), sizeof (timeoutMs));
+                            reinterpret_cast<const char*> (&recvMs), sizeof (recvMs));
+                setsockopt (raw, SOL_SOCKET, SO_SNDTIMEO,
+                            reinterpret_cast<const char*> (&sendMs), sizeof (sendMs));
+            }
         }
        #endif
 
@@ -220,12 +230,16 @@ private:
             "Connection: close\r\n\r\n") + body;
 
         // socket 的 write 可能只发出一部分（接收窗口小/缓冲满），
-        // 必须循环发送到全部写完，否则浏览器拿到半截页面（黑屏无字）
+        // 必须循环发送到全部写完，否则浏览器拿到半截页面（黑屏无字）。
+        // 同时加 4 秒总时限，防止任何异常把线程卡死。
         const auto utf8 = bytes.toUTF8();
         const char* ptr = utf8.getAddress();
         int remaining = (int) utf8.sizeInBytes() - 1;
+        int totalSent = 0;
 
-        while (remaining > 0)
+        const double wDeadline = juce::Time::getMillisecondCounterHiRes() + 4000.0;
+
+        while (remaining > 0 && juce::Time::getMillisecondCounterHiRes() < wDeadline)
         {
             const int sent = client.write (ptr, remaining);
 
@@ -237,6 +251,17 @@ private:
 
             ptr += sent;
             remaining -= sent;
+            totalSent += sent;
+        }
+
+        {
+            juce::File::getSpecialLocation (juce::File::tempDirectory)
+                .getChildFile ("LyricSync-cast.log")
+                .appendText (juce::Time::getCurrentTime().toString (false, true, true, true)
+                             + "  resp path=" + path + " total=" + juce::String ((int) utf8.sizeInBytes() - 1)
+                             + " sent=" + juce::String (totalSent)
+                             + (remaining > 0 ? " INCOMPLETE" : " ok")
+                             + "\r\n", false, false, "\r\n");
         }
     }
 
