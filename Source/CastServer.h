@@ -53,7 +53,15 @@ public:
         if (isThreadRunning())
         {
             quitFlag = true;
-            stopThread (1500);
+
+            // 线程可能正阻塞在 accept 上：自己连一次把它打醒
+            {
+                juce::StreamingSocket wake;
+                wake.connect ("127.0.0.1", port, 300);
+                wake.close();
+            }
+
+            stopThread (2000);
         }
 
         castPool.removeAllJobs (true, 1000);
@@ -77,18 +85,22 @@ public:
 private:
     void run() override
     {
+        // 直接阻塞 accept：waitUntilReady 对监听 socket 在部分系统上不可靠，
+        // 会导致连接一直躺在内核队列里没人处理（浏览器永远白屏）。
         while (! quitFlag && ! threadShouldExit())
         {
             if (listener == nullptr)
                 break;
 
-            if (listener->waitUntilReady (true, 100) != 1)
-                continue;
-
             auto* client = listener->waitForNextConnection();
 
             if (client == nullptr)
+            {
+                juce::Thread::sleep (15);
                 continue;
+            }
+
+            ++acceptedCount;
 
             // 每个连接丢进线程池，慢客户端不阻塞其它设备
             castPool.addJob ([this, client]()
@@ -153,6 +165,19 @@ private:
         else if (path.startsWith ("/ping"))
         {
             body = "pong";
+            mime = "text/plain; charset=utf-8";
+        }
+        else if (path.startsWith ("/diag"))
+        {
+            const int lyricBytes = [this]
+            {
+                const juce::ScopedLock sl (dataLock);
+                return lyricsJson.getNumBytesAsUTF8();
+            }();
+
+            body = "accepted=" + juce::String (acceptedCount.load())
+                 + " port=" + juce::String (port)
+                 + " lyricBytes=" + juce::String (lyricBytes);
             mime = "text/plain; charset=utf-8";
         }
         else
@@ -262,5 +287,6 @@ tick();
 
     std::unique_ptr<juce::StreamingSocket> listener;
     std::atomic<bool> quitFlag { false };
+    std::atomic<int>  acceptedCount { 0 };
     int port = 8089;
 };
