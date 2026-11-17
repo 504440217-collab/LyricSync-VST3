@@ -475,6 +475,25 @@ private:
     bool tapStagePress = false;           // 舞台按下，抬起时判定「点击打轴 / 拖动翻看」
     double tapListHoldUntilMs = 0.0;      // 手动滚动列表后暂停跟随的截止时间
     std::vector<double> tapOriginalTimes; // 进入打轴时备份的原始时间轴（完成时回填未重打句）
+    
+    //---- 局域网网页投屏 -----------------------------------------------------
+    CastServer         castServer;          // 内嵌 HTTP 服务（歌词页 / state / lyrics）
+    juce::CriticalSection castLock;         // 保护 castLyricsJson
+    juce::String       castLyricsJson;      // 服务线程读的歌词 JSON
+    juce::String       castUrl;             // http://<LAN-IP>:<端口>
+    bool               castOpen   = false;  // 投屏面板是否打开（服务是否运行）
+    int                castPort   = 0;
+    int                castQrSize = 0;      // QR 模块边长（0 = 未生成）
+    std::vector<bool>  castQrModules;
+    double             lastCastJsonMs = 0.0;
+    std::atomic<int>   castVersion { 0 };
+    
+    void startCast();
+    void stopCast();
+    void buildQr();
+    void rebuildCastLyrics();
+    juce::Rectangle<float> castPanelArea() const;
+    void paintCast (juce::Graphics& g);
     bool tapFresh = false;                // 全新歌词打轴（无原始时间码）：舞台静止逐句打
     double tapListLastClickMs = 0.0;      // 上一击列表行的时间（自判双击用）
     juce::Point<float> tapStagePressPos;
@@ -533,6 +552,7 @@ private:
     juce::TextButton  tapPauseButton;
     juce::TextButton  tapHostTransportButton;   // 同步宿主播放/暂停
     juce::TextButton  tapRestampAllButton;            // 重打全部：整首时间轴归零从头打
+    juce::IconButton  castCloseButton  { IconButton::Icon::close };   // 投屏面板关闭
     juce::TextButton  tapRowRestampButton;
     juce::TextButton  tapRowApplyButton;
     juce::TextButton  tapRowCancelButton;

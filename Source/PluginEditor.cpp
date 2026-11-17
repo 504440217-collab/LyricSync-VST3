@@ -1,10 +1,13 @@
 #include "PluginEditor.h"
+#include "CastServer.h"
 #include "DemoLyrics.h"
 
 #include <juce_core/juce_core.h>   // FileOutputStream：导出 LRC 时显式按 UTF-8 写
 #include <juce_events/juce_events.h>   // JUCEApplicationBase：运行时判断是否为独立版
 
 #include <cmath>
+#include <algorithm>
+#include "qrcodegen.h"
 #include <string>
 #include <thread>
 
@@ -14,7 +17,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.4.7";
+    const char* const kVersion = "2.5.0";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -1297,7 +1300,7 @@ void LyricSyncEditor::updateVisibility()
         return;
     }
 
-    const bool overlay = settingsOpen || aboutOpen || searchOpen;
+    const bool overlay = settingsOpen || aboutOpen || searchOpen || castOpen;
 
     // 侧栏收起后整列控件一起隐藏（竖版仍走底部布局，不受影响）
     const bool railOpen = (orientation == Orientation::vertical) || railOpenNow();
@@ -1407,6 +1410,7 @@ void LyricSyncEditor::updateVisibility()
         c->setVisible (settingsOpen);
 
     closeAboutButton.setVisible (aboutOpen);
+    castCloseButton.setVisible (castOpen);
     logoButton.setVisible (normal && railOpen);   // 点左上角 LOGO 看插件信息
 
     // 旧版弹窗里的搜索控件：内联化之后全部不再显示
@@ -1795,6 +1799,13 @@ void LyricSyncEditor::resized()
     lookAndFeel.typeface = uiTypefaceName();
 
     updateScaledFonts();
+
+    if (castOpen)
+    {
+        const auto panel = castPanelArea();
+        castCloseButton.setBounds (scaledRect (panel.getRight() - 48.0f,
+                                               panel.getY() + 10.0f, 36.0f, 36.0f));
+    }
 
     const auto stage = stageArea();
 
@@ -2257,8 +2268,11 @@ void LyricSyncEditor::paint (juce::Graphics& g)
 
     // 走带读数条：编辑 / 打轴 / 弹面板时让位，其余时候常驻
     if (! zenMode && ! editing && ! annotateMode
-        && ! settingsOpen && ! aboutOpen && ! searchOpen)
+        && ! settingsOpen && ! aboutOpen && ! searchOpen && ! castOpen)
         paintHud (g);
+
+    if (castOpen)
+        paintCast (g);
 
     if (settingsOpen)
         paintSettings (g, settingsPanelArea());
@@ -4401,6 +4415,22 @@ void LyricSyncEditor::timerCallback()
         smoothedSung = -1.0f;
     }
 
+    // 投屏开启时：状态每帧刷新；歌词数据每 500ms 重建（版本号+1 让网页重新拉取）
+    if (castServer.isRunning())
+    {
+        {
+            const juce::ScopedLock sl (castServer.dataLock);
+            castServer.stateJson = "{\"t\":" + juce::String (displayTime, 3)
+                                 + ",\"v\":" + juce::String (castVersion.load()) + "}";
+        }
+
+        if (now - lastCastJsonMs > 500.0)
+        {
+            lastCastJsonMs = now;
+            rebuildCastLyrics();
+        }
+    }
+
     if (tapMode)
     {
         // 打轴以「指针」为准：右侧大字就是下一句要打的歌词，静止不乱动；
@@ -4677,8 +4707,14 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
     }
     if (button == &castButton)
     {
-        lastWarning = tr (Lang::TextId::castSoon);
-        repaint();
+        if (castOpen) stopCast();
+        else          startCast();
+        return;
+    }
+
+    if (button == &castCloseButton)
+    {
+        stopCast();
         return;
     }
     if (button == &fontMinusButton)     { fontStep (-5); return; }
@@ -7286,6 +7322,203 @@ void LyricSyncEditor::closeTapRowEditing()
     updateVisibility();
     resized();
     repaint();
+}
+
+//==============================================================================
+//  局域网网页投屏
+//==============================================================================
+void LyricSyncEditor::startCast()
+{
+    // 找本机局域网 IPv4（优先 192.168 / 10 / 172）
+    juce::Array<juce::IPAddress> addrs;
+    juce::IPAddress::findAllAddresses (addrs);
+
+    juce::String ip;
+    int best = -1;
+
+    for (const auto& a : addrs)
+    {
+        const auto str = a.toString();
+
+        if (str.startsWith ("127."))
+            continue;
+
+        int score = str.startsWith ("192.168.") ? 3
+                  : str.startsWith ("10.")      ? 2
+                  : str.startsWith ("172.")     ? 1 : 0;
+
+        if (score > best)
+        {
+            best = score;
+            ip = str;
+        }
+    }
+
+    if (ip.isEmpty())
+        ip = "127.0.0.1";
+
+    if (! castServer.start (8089))
+    {
+        lastWarning = "投屏服务启动失败：端口被占用";
+        repaint();
+        return;
+    }
+
+    castPort = castServer.getPort();
+    castUrl  = "http://" + ip + ":" + juce::String (castPort);
+    castVersion.store (0);
+    buildQr();
+    lastCastJsonMs = 0.0;         // 让 timerCallback 立刻重建歌词 JSON
+    castOpen = true;
+    updateVisibility();
+    resized();
+    repaint();
+}
+
+void LyricSyncEditor::stopCast()
+{
+    castServer.stop();
+    castOpen = false;
+    updateVisibility();
+    resized();
+    repaint();
+}
+
+void LyricSyncEditor::buildQr()
+{
+    uint8_t temp[qrcodegen_BUFFER_LEN_MAX];
+    uint8_t qr[qrcodegen_BUFFER_LEN_MAX];
+
+    if (qrcodegen_encodeText (castUrl.toUTF8().getAddress(), temp, qr,
+                              qrcodegen_Ecc_MEDIUM, 1, 10,
+                              qrcodegen_Mask_AUTO, true))
+    {
+        castQrSize = qrcodegen_getSize (qr);
+        castQrModules.clear();
+
+        for (int y = 0; y < castQrSize; ++y)
+            for (int x = 0; x < castQrSize; ++x)
+                castQrModules.push_back (qrcodegen_getModule (qr, x, y));
+    }
+    else
+    {
+        castQrSize = 0;
+        castQrModules.clear();
+    }
+}
+
+void LyricSyncEditor::rebuildCastLyrics()
+{
+    auto& doc = processor.lyrics();
+
+    static auto escape = [] (const juce::String& in)
+    {
+        juce::String out;
+
+        for (int i = 0; i < in.length(); ++i)
+        {
+            const auto c = in[i];
+
+            if (c == '"' || c == '\\')
+                out << '\\' << c;
+            else if (c == '\n' || c == '\r')
+                out << ' ';
+            else
+                out << c;
+        }
+
+        return out;
+    };
+
+    juce::String j = "{\"v\":" + juce::String (castVersion.load() + 1) + ",\"lines\":[";
+
+    for (int i = 0; i < doc.size(); ++i)
+    {
+        const auto& l = doc.line (i);
+
+        if (i > 0)
+            j << ",";
+
+        j << "{\"t\":" << juce::String (l.time, 3)
+          << ",\"text\":\"" << escape (l.text) << "\"}";
+    }
+
+    j << "]}";
+
+    {
+        const juce::ScopedLock sl (castServer.dataLock);
+        castLyricsJson = j;
+    }
+
+    castVersion.store (castVersion.load() + 1);
+}
+
+juce::Rectangle<float> LyricSyncEditor::castPanelArea() const
+{
+    const float w = 480.0f, hgt = 430.0f;
+    return { juce::jmax (16.0f, (baseW() - w) * 0.5f),
+             juce::jmax (16.0f, (baseH() - hgt) * 0.5f - 20.0f), w, hgt };
+}
+
+void LyricSyncEditor::paintCast (juce::Graphics& g)
+{
+    const auto panel = castPanelArea();
+
+    g.setColour (juce::Colours::black.withAlpha (0.55f));
+    g.fillRect (juce::Rectangle<float> (0.0f, 0.0f, baseW(), baseH()));
+
+    const bool lightTheme = palette.text.getPerceivedBrightness() < 0.5f;
+    const auto cardBg  = lightTheme ? juce::Colour (0xfff5f6f8) : juce::Colour (0xff131316);
+    const auto lineCol = lightTheme ? juce::Colour (0xffd4dbea) : juce::Colour (0xff2c2c33);
+    const auto txt3    = lightTheme ? juce::Colour (0xff98a2b8) : juce::Colour (0xff63636d);
+
+    g.setColour (cardBg.withAlpha (0.98f));
+    g.fillRoundedRectangle (panel, 16.0f);
+    g.setColour (lineCol);
+    g.drawRoundedRectangle (panel.reduced (0.5f), 16.0f, 1.0f);
+
+    drawText (g, juce::Rectangle<float> (panel.getX() + 24.0f, panel.getY() + 16.0f,
+                                         260.0f, 26.0f),
+              "投屏 · 局域网", 18.0f, palette.text, true, -1, {}, 1.0f,
+              juce::Justification::centredLeft);
+
+    // 二维码（白底卡片）
+    const juce::Rectangle<float> qrBox (panel.getCentreX() - 125.0f, panel.getY() + 54.0f,
+                                        250.0f, 250.0f);
+    g.setColour (juce::Colours::white);
+    g.fillRoundedRectangle (qrBox, 10.0f);
+
+    if (castQrSize > 0)
+    {
+        const float cell  = 250.0f / (float) (castQrSize + 6);
+        const float total = cell * (float) castQrSize;
+        const float ox = qrBox.getCentreX() - total * 0.5f;
+        const float oy = qrBox.getCentreY() - total * 0.5f;
+
+        g.setColour (juce::Colours::black);
+
+        for (int y = 0; y < castQrSize; ++y)
+            for (int x = 0; x < castQrSize; ++x)
+                if (castQrModules[(size_t) (y * castQrSize + x)])
+                    g.fillRect (ox + (float) x * cell, oy + (float) y * cell,
+                                cell + 0.3f, cell + 0.3f);
+    }
+
+    // 网址
+    g.setColour (palette.accent);
+    g.setFont (uiFont (17.0f, true));
+    g.drawText (castUrl, panel.getX() + 20, panel.getY() + 318,
+                (int) panel.getWidth() - 40, 26, juce::Justification::centred, false);
+
+    g.setColour (txt3);
+    g.setFont (uiFont (11.0f));
+    g.drawText ("手机 / 平板 / 电视的浏览器扫码，或直接输入上面的网址",
+                panel.getX() + 20, panel.getY() + 350,
+                (int) panel.getWidth() - 40, 18, juce::Justification::centred, false);
+
+    g.drawText ("歌词逐句高亮，自动跟随播放 · 点右上角 × 关闭投屏",
+                panel.getX() + 20, panel.getY() + 372,
+                (int) panel.getWidth() - 40, 18, juce::Justification::centred, false);
 }
 
 void LyricSyncEditor::toggleHostTransport()
