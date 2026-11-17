@@ -155,7 +155,7 @@ TABLE = [
                         "Undo the last anchor change or offset nudge"),
 
     #--- 逐句颜色与备注 -----------------------------------------------------
-    ("annotate",        "着色备注", "Style"),
+    ("annotate",        "备注", "Note"),
     ("tipAnnotate",     "刷子图标：点开后光标变 I 形，在原歌词界面拖选句子，右键在鼠标旁设置；点颜色立即生效，备注需点应用",
                         "Brush: I-beam cursor, drag to select lines in the lyric view, right-click for the box; colours apply instantly, notes need Apply") ,
     ("annotateTitle",   "着色与备注", "Colour and note"),
