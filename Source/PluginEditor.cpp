@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.4.5";
+    const char* const kVersion = "2.4.6";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -2872,19 +2872,11 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
             g.drawText (tr (Lang::TextId::offsetLabel),
                         juce::Rectangle<float> (16.0f, off.getY() - 14.0f, 80.0f, 12.0f),
                         juce::Justification::centredLeft, false);
-            g.drawText (tr (Lang::TextId::offsetHint),
-                        juce::Rectangle<float> (railW - 116.0f, off.getY() - 14.0f, 100.0f, 12.0f),
-                        juce::Justification::centredRight, false);
-
             g.setColour (titleCol);
             g.setFont (uiFont (10.0f));
             g.drawText (tr (Lang::TextId::fontSize),
                         juce::Rectangle<float> (16.0f, fnt.getY() - 14.0f, 80.0f, 12.0f),
                         juce::Justification::centredLeft, false);
-            g.drawText (tr (Lang::TextId::fontHint),
-                        juce::Rectangle<float> (railW - 156.0f, fnt.getY() - 14.0f, 140.0f, 12.0f),
-                        juce::Justification::centredRight, false);
-
             paintStepperBox (g, off, {}, offsetScrub, true);
             paintStepperBox (g, fnt, {}, fontScrub, false);
         }
@@ -3532,6 +3524,19 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
     //---- 已记录列表（可点，点一行就从那一句重打）-------------------------
     const auto ids = tapListIndices();
 
+    // 当前演唱到的那一句：用原始时间轴做参照（打轴中时间码被清空也能对上）
+    int currentLine = -1;
+
+    for (int i = 0; i < static_cast<int> (tapLines.size()); ++i)
+    {
+        const double ref = i < static_cast<int> (tapOriginalTimes.size())
+                             && tapOriginalTimes[(size_t) i] >= 0.0
+                           ? tapOriginalTimes[(size_t) i] : tapTimes[(size_t) i];
+
+        if (ref >= 0.0 && ref <= displayTime + 0.001)
+            currentLine = i;
+    }
+
     if (! rows.empty())
     {
 
@@ -3549,12 +3554,15 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
             const auto r  = rows[(size_t) i];
             const int  li = ids[(size_t) i];
 
-            // 高亮只保留一种：▶ 打轴指针（下一句要打的），其余不再额外亮
+            // 高亮两种：▶ 打轴指针（强，下一句要打的）+ 演唱到的句子（淡色，持续跟随）
             const bool thisEditing = (li == tapEditIndex);
             const bool thisPointer = (li == tapIndex && ! thisEditing);
+            const bool thisCurrent = (li == currentLine && ! thisEditing
+                                      && ! thisPointer);
 
             g.setColour (thisEditing ? palette.accent.withAlpha (0.10f)
                        : thisPointer ? palette.accent.withAlpha (0.22f)
+                       : thisCurrent ? palette.accent.withAlpha (0.10f)
                                      : palette.text.withAlpha (0.05f));
             g.fillRoundedRectangle (r, 5.0f);
 
@@ -3563,6 +3571,12 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
                 // ▶ 打轴指针：下一按空格就写这一句
                 g.setColour (palette.accent);
                 g.drawRoundedRectangle (r.expanded (1.5f), 6.0f, 1.6f);
+            }
+            else if (thisCurrent)
+            {
+                // 正在演唱的句子：细描边提示歌曲位置
+                g.setColour (palette.accent.withAlpha (0.45f));
+                g.drawRoundedRectangle (r, 5.0f, 1.0f);
             }
 
             g.setColour (thisEditing ? palette.accent.withAlpha (0.55f)
@@ -4404,11 +4418,34 @@ void LyricSyncEditor::timerCallback()
 
         tapFollowTime = displayTime;
 
-        // 列表跟随：让指针那一行始终保持在可见窗口里
+        // 列表跟随：重打模式跟「正在唱」的那一句持续翻页；
+        // 全新打轴（无原始时间码）跟「指针」那一行。
         // （用户手动滚过列表后暂停几秒，不去抢他的位置）
         if (! tapListDragging
             && juce::Time::getMillisecondCounterHiRes() > tapListHoldUntilMs)
-            keepTapRowVisible (tapIndex);
+        {
+            if (tapFresh)
+            {
+                keepTapRowVisible (tapIndex);      // 全新打轴：列表跟着指针走
+            }
+            else
+            {
+                int playingLine = -1;
+
+                for (int i = 0; i < static_cast<int> (tapLines.size()); ++i)
+                {
+                    const double ref = i < static_cast<int> (tapOriginalTimes.size())
+                                         && tapOriginalTimes[(size_t) i] >= 0.0
+                                       ? tapOriginalTimes[(size_t) i] : tapTimes[(size_t) i];
+
+                    if (ref >= 0.0 && ref <= displayTime + 0.001)
+                        playingLine = i;
+                }
+
+                if (playingLine >= 0)
+                    keepTapRowVisible (playingLine);
+            }
+        }
 
         const auto want = tr (processor.isPlaying.load() ? Lang::TextId::tapHostPause
                                                          : Lang::TextId::tapHostPlay);
