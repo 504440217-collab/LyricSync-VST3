@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.2.4";
+    const char* const kVersion = "2.2.5";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -5774,11 +5774,11 @@ void LyricSyncEditor::loadSelectedResult()
     if (searchBusy || searchSel < 0 || searchSel >= static_cast<int> (searchResults.size()))
         return;
 
-    searchListOpen = false;             // 选中歌词后列表自动收回
-    searchResults.clear();              // 清空结果，浮层随之消失
-    searchSel = -1;
+    const auto result = searchResults[(size_t) searchSel];   // 先取出结果
 
-    const auto result = searchResults[(size_t) searchSel];
+    searchListOpen = false;             // 选中歌词后列表自动收回
+    searchResults.clear();              // 再清空列表，浮层随之消失
+    searchSel = -1;
 
     ++searchToken;
     const int token = searchToken;
