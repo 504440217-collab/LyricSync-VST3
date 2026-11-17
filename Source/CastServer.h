@@ -22,7 +22,7 @@
 class CastServer : private juce::Thread
 {
 public:
-    CastServer() : juce::Thread ("LyricSyncCast"), castPool (3) {}
+    CastServer() : juce::Thread ("LyricSyncCast"), castPool (6) {}
 
     ~CastServer() override { stop(); }
 
@@ -142,17 +142,26 @@ private:
        #endif
 
         juce::String request;
+        const double rDeadline = juce::Time::getMillisecondCounterHiRes() + 1200.0;
 
-        for (int guard = 0; guard < 4; ++guard)
+        // JUCE 的 read(..., false) 是「探一次立刻返回」，不会等数据，
+        // 所以必须自己轮询：读不到就 sleep 再试，等完整请求头或超时。
+        while (juce::Time::getMillisecondCounterHiRes() < rDeadline)
         {
             char buf[1024] = {};
             const int n = client.read (buf, sizeof (buf) - 1, false);
 
             if (n > 0)
+            {
                 request += juce::String::fromUTF8 (buf, (size_t) n);
 
-            if (n <= 0 || request.contains ("\r\n\r\n"))
-                break;
+                if (request.contains ("\r\n\r\n"))
+                    break;
+            }
+            else
+            {
+                juce::Thread::sleep (8);
+            }
         }
 
         auto logLine = [] (const juce::String& text)
