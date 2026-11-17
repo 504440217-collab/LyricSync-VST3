@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.4.3";
+    const char* const kVersion = "2.4.4";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -1923,8 +1923,8 @@ void LyricSyncEditor::resized()
                 tapPauseButton    .setBounds (scaledRect (sx + half + 4.0f, 160.0f, 0.0f, 0.0f));
 
                 // 退出键缩小、靠左下贴边；完成键已移除（修改实时生效）
-                tapExitButton  .setBounds (scaledRect (sx, baseH() - 40.0f, 96.0f, 28.0f));
-                tapFinishButton.setBounds (scaledRect (sx, baseH() - 40.0f, 0.0f, 0.0f));
+                tapExitButton  .setBounds (scaledRect (sx, baseH() - 34.0f, 84.0f, 24.0f));
+                tapFinishButton.setBounds (scaledRect (sx, baseH() - 34.0f, 0.0f, 0.0f));
             }
             else
             {
@@ -5227,9 +5227,9 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
             || e.eventComponent == &tapRowCancelButton)
             return;
 
-        // 正在编辑某一行：点击其它地方直接退出编辑（不必点「取消」）
+        // 正在编辑某一行：点击其它地方 = 应用修改（等同回车），然后继续处理这次点击
         if (tapEditIndex >= 0)
-            closeTapRowEditing();
+            applyTapRow();
 
         grabKeyboardFocus();
 
@@ -7447,45 +7447,15 @@ void LyricSyncEditor::showEditorMenu (juce::TextEditor& te, juce::Point<int> scr
 //==============================================================================
 std::vector<int> LyricSyncEditor::tapListIndices() const
 {
-    std::vector<int> ids;
+    auto ids = tapListSortedIds();
 
-    if (! tapMode)
-        return ids;
-
-    const bool v = (orientation == Orientation::vertical);
-    const int  maxRows = v ? 4 : 7;
-
-    // 全部歌词行都列出来（进入打轴时时间码被清空，但列表不能空）：
-    // 打过轴的句子按新时间先后排在前面；没打过的句子按原顺序排在后面
-    const int total = static_cast<int> (tapLines.size());
-
-    std::vector<std::pair<double, int>> stamped;
-    std::vector<int> unstamped;
-
-    for (int i = 0; i < total; ++i)
-    {
-        if (i < static_cast<int> (tapTimes.size()) && tapTimes[(size_t) i] >= 0.0)
-            stamped.push_back ({ tapTimes[(size_t) i], i });
-        else
-            unstamped.push_back (i);
-    }
-
-    std::sort (stamped.begin(), stamped.end(),
-               [] (const std::pair<double, int>& a, const std::pair<double, int>& b)
-               { return a.first < b.first; });
-
-    for (const auto& st : stamped)
-        ids.push_back (st.second);
-
-    for (int i : unstamped)
-        ids.push_back (i);
-
+    const int maxRows = tapListMaxRows();
     const int n = static_cast<int> (ids.size());
 
     if (n <= maxRows)
         return ids;
 
-    // 从第一句开始从上往下排；tapListScroll 是窗口起始偏移（0 = 顶部）
+    // 可视窗口：tapListScroll 是窗口起始偏移（0 = 顶部）
     const int scroll = juce::jlimit (0, n - maxRows, tapListScroll);
     const int begin  = scroll;
     const int end    = juce::jmin (n, begin + maxRows);
@@ -7493,11 +7463,49 @@ std::vector<int> LyricSyncEditor::tapListIndices() const
     return std::vector<int> (ids.begin() + begin, ids.begin() + end);
 }
 
+/** 全部歌词行按有效时间码升序（新时间优先，其次原始时间，都没有的排最后）。 */
+std::vector<int> LyricSyncEditor::tapListSortedIds() const
+{
+    std::vector<int> ids;
+
+    if (! tapMode)
+        return ids;
+
+    const int total = static_cast<int> (tapLines.size());
+    std::vector<std::pair<double, int>> rows;
+
+    for (int i = 0; i < total; ++i)
+    {
+        const double t = i < static_cast<int> (tapTimes.size())
+                           && tapTimes[(size_t) i] >= 0.0
+                           ? tapTimes[(size_t) i]
+                           : (i < static_cast<int> (tapOriginalTimes.size())
+                                && tapOriginalTimes[(size_t) i] >= 0.0
+                                ? tapOriginalTimes[(size_t) i] : 1.0e9);
+
+        rows.push_back ({ t, i });
+    }
+
+    std::sort (rows.begin(), rows.end(),
+               [] (const std::pair<double, int>& a, const std::pair<double, int>& b)
+               {
+                   if (a.first != b.first)
+                       return a.first < b.first;
+
+                   return a.second < b.second;
+               });
+
+    for (const auto& r : rows)
+        ids.push_back (r.second);
+
+    return ids;
+}
+
 juce::Rectangle<float> LyricSyncEditor::tapListTrack (juce::Rectangle<float> area) const
 {
     const bool v    = (orientation == Orientation::vertical);
     const bool side = (! v && railOpenNow());
-    const int  maxRows = v ? 4 : 7;
+    const int  maxRows = tapListMaxRows();
     const auto ids = tapListIndices();
 
     if (! tapMode || static_cast<int> (ids.size()) < maxRows)
@@ -7506,7 +7514,7 @@ juce::Rectangle<float> LyricSyncEditor::tapListTrack (juce::Rectangle<float> are
     if (side)
         area = tapListArea();
 
-    const float rowH = v ? 24.0f : (side ? 42.0f : 27.0f);
+    const float rowH = v ? 24.0f : (side ? 40.0f : 27.0f);
     const float top  = area.getY() + (side ? 0.0f : 52.0f);
     const float h    = static_cast<float> (ids.size()) * rowH;
 
@@ -7521,8 +7529,23 @@ int LyricSyncEditor::tapListTotal() const
 
 int LyricSyncEditor::tapListMaxScroll() const
 {
-    const int maxRows = (orientation == Orientation::vertical) ? 4 : 7;
-    return juce::jmax (0, tapListTotal() - maxRows);
+    return juce::jmax (0, tapListTotal() - tapListMaxRows());
+}
+
+/** 列表可视行数：横版侧栏按空间动态算（行高 40 + 2 间隙），竖版固定 4。 */
+int LyricSyncEditor::tapListMaxRows() const
+{
+    if (orientation == Orientation::vertical)
+        return 4;
+
+    if (! railOpenNow())
+        return 7;
+
+    const float rowH = 40.0f;
+    const float gap  = 2.0f;
+    const auto  area = tapListArea();
+
+    return juce::jmax (3, static_cast<int> ((area.getHeight() + gap) / (rowH + gap)));
 }
 
 juce::Rectangle<float> LyricSyncEditor::tapListThumb (juce::Rectangle<float> area) const
@@ -7570,14 +7593,14 @@ void LyricSyncEditor::syncTapToPlayhead (double t)
 /** 让 lineId 对应的行保持在列表可见窗口里（跟随播放头 / 预备重打共用）。 */
 void LyricSyncEditor::keepTapRowVisible (int lineId)
 {
-    const int n = static_cast<int> (tapLines.size());
-    const bool v = (orientation == Orientation::vertical);
-    const int  maxRows = v ? 4 : 7;
+    const auto ids = tapListSortedIds();
+    const int  n = static_cast<int> (ids.size());
+    const int  maxRows = tapListMaxRows();
     const int  maxScroll = juce::jmax (0, n - maxRows);
 
     for (int p = 0; p < n; ++p)
     {
-        if (p != lineId)
+        if (ids[(size_t) p] != lineId)
             continue;
 
         if (p < tapListScroll)
@@ -7592,9 +7615,7 @@ void LyricSyncEditor::keepTapRowVisible (int lineId)
 
 void LyricSyncEditor::scrollTapList (int deltaRows)
 {
-    const bool v = (orientation == Orientation::vertical);
-    const int  maxRows = v ? 4 : 7;
-    const int  maxScroll = juce::jmax (0, static_cast<int> (tapLines.size()) - maxRows);
+    const int maxScroll = juce::jmax (0, static_cast<int> (tapLines.size()) - tapListMaxRows());
 
     const int next = juce::jlimit (0, maxScroll, tapListScroll + deltaRows);
 
@@ -7616,7 +7637,7 @@ juce::Rectangle<float> LyricSyncEditor::tapListArea() const
         // 侧栏：品牌 10..30、模式标题 36..56、记录本句 60..90、
         // 两行操作 96..154、列表标题 162..178；列表从 184 起延伸到退出键上方。
         const float top    = 184.0f;
-        const float bottom = baseH() - 56.0f;
+        const float bottom = baseH() - 38.0f;
         return { 10.0f, top, rail - 26.0f, juce::jmax (60.0f, bottom - top) };
     }
 
@@ -7635,7 +7656,7 @@ std::vector<juce::Rectangle<float>> LyricSyncEditor::tapListRows (juce::Rectangl
 
     const bool  v    = (orientation == Orientation::vertical);
     const bool  side = (! v && railOpenNow());
-    const float rowH = v ? 24.0f : (side ? 42.0f : 27.0f);
+    const float rowH = v ? 24.0f : (side ? 40.0f : 27.0f);
 
     // 侧栏展开时忽略传进来的舞台区域，直接用侧栏中部
     if (side)
