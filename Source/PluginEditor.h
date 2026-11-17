@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PluginProcessor.h"
+#include "CastServer.h"
 #include "KrcLyrics.h"
 #include "OnlineLyrics.h"
 #include "WordLyrics.h"
@@ -552,7 +553,7 @@ private:
     juce::TextButton  tapPauseButton;
     juce::TextButton  tapHostTransportButton;   // 同步宿主播放/暂停
     juce::TextButton  tapRestampAllButton;            // 重打全部：整首时间轴归零从头打
-    juce::IconButton  castCloseButton  { IconButton::Icon::close };   // 投屏面板关闭
+    IconButton        castCloseButton  { IconButton::Icon::close };   // 投屏面板关闭
     juce::TextButton  tapRowRestampButton;
     juce::TextButton  tapRowApplyButton;
     juce::TextButton  tapRowCancelButton;

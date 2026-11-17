@@ -106,7 +106,7 @@ private:
 
         // "GET /path HTTP/1.1"
         const int sp1 = head.indexOfChar (' ');
-        const int sp2 = head.indexOfCharFrom (sp1 + 1, ' ');
+        const int sp2 = head.indexOfChar (' ', sp1 + 1);
 
         if (sp1 < 0 || sp2 <= sp1)
             return;
