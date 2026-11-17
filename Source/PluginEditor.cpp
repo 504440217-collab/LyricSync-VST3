@@ -2543,7 +2543,7 @@ void LyricSyncEditor::paintSidebarSearch (juce::Graphics& g)
         g.setColour (juce::Colours::black.withAlpha (0.45f));
         g.fillRoundedRectangle (panel.translated (0.0f, 6.0f), 12.0f);
 
-        g.setColour (lightTheme ? juce::Colour (0xffffffff) : juce::Colour (0xff17171b));
+        g.setColour (light ? juce::Colour (0xffffffff) : juce::Colour (0xff17171b));
         g.fillRoundedRectangle (panel, 12.0f);
         g.setColour (line);
         g.drawRoundedRectangle (panel.reduced (0.5f), 12.0f, 1.0f);
