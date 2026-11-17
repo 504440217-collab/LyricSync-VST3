@@ -3439,7 +3439,7 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
         {
             drawText (g, juce::Rectangle<float> (rows[0].getX(), rows[0].getY() - 20.0f,
                                                  rows[0].getWidth(), 16.0f),
-                      tr (Lang::TextId::tapListTitle), 10.0f * widthScale,
+                      tr (Lang::TextId::tapListTitle), 10.0f,
                       palette.faint, false, -1.0f, {}, 1.0f,
                       juce::Justification::centredLeft);
         }
