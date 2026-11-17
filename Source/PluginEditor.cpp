@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.0.7";
+    const char* const kVersion = "2.0.8";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -1326,7 +1326,7 @@ void LyricSyncEditor::updateVisibility()
 
     // 纯享模式把上面这些都隐藏过，回来必须逐个恢复；
     // 这三个 Label 不在上面那批里，之前漏掉，导致退出全屏后提示词永久消失。
-    fileLabel .setVisible (normal);
+    fileLabel .setVisible (false);   // 顶部文件信息行按用户要求横竖屏都移除
     audioLabel.setVisible (normal);
     hintLabel .setVisible (false);   // 左下角功能介绍按用户要求移除
 
@@ -4288,10 +4288,9 @@ void LyricSyncEditor::updateLabels (double t)
 
     audioLabel .setText (audioRangeText(), juce::dontSendNotification);
 
-    auto label = fileDescription;
-    if (lastWarning.isNotEmpty())
-        label += tr (Lang::TextId::warningPrefix) + lastWarning;
-    fileLabel.setText (label, juce::dontSendNotification);
+    // 顶部文件信息行已移除，不再拼接 / 更新文字
+    (void) fileDescription;
+    (void) lastWarning;
 }
 
 juce::String LyricSyncEditor::hintText() const
