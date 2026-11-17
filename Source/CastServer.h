@@ -114,29 +114,53 @@ private:
 
     void handleClient (juce::StreamingSocket& client)
     {
-        // accept 后数据往往晚几毫秒才到；而且浏览器会开「预连接」
-        // （只连不发数据）——直接 read 会永久阻塞，把线程池耗尽。
-        // 所以用 waitUntilReady 等数据：1.5s 内没数据的连接直接关闭。
-        juce::String request;
-        const double deadline = juce::Time::getMillisecondCounterHiRes() + 1500.0;
-
-        while (juce::Time::getMillisecondCounterHiRes() < deadline)
+        // 给连接设「接收超时」（SO_RCVTIMEO）：阻塞 read 有数据立刻返回、
+        // 1.5 秒没数据返回 -1。绕开 waitUntilReady 的不可靠（它会把真请求也当空）。
+       #if JUCE_WINDOWS
         {
-            if (client.waitUntilReady (true, 100) != 1)
-                continue;                      // 100ms 内没数据，循环看 deadline
+            auto* raw = reinterpret_cast<SOCKET> (client.getRawSocketHandle());
+            DWORD timeoutMs = 1500;
 
+            if (raw != INVALID_SOCKET)
+                setsockopt (raw, SOL_SOCKET, SO_RCVTIMEO,
+                            reinterpret_cast<const char*> (&timeoutMs), sizeof (timeoutMs));
+        }
+       #endif
+
+        juce::String request;
+
+        for (int guard = 0; guard < 4; ++guard)
+        {
             char buf[1024] = {};
             const int n = client.read (buf, sizeof (buf) - 1, false);
 
             if (n > 0)
                 request += juce::String::fromUTF8 (buf, (size_t) n);
 
-            if (request.contains ("\r\n\r\n"))
+            if (n <= 0 || request.contains ("\r\n\r\n"))
                 break;
         }
 
+        auto logLine = [this] (const juce::String& text)
+        {
+            auto f = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                         .getChildFile ("LyricSync-cast.log");
+
+            if (auto stream = f.appendText())
+                if (auto* out = stream->openedOk() ? stream.get() : nullptr)
+                    out->writeText (juce::Time::getCurrentTime().toString (false, true, true, true)
+                                    + "  " + text + "\n");
+        };
+
+        logLine ("conn accepted=" + juce::String (acceptedCount.load())
+                 + " request='" + request.substring (0, 60).replace ("\r", "").replace ("\n", " ")
+                 + "' bytes=" + juce::String (request.length()));
+
         if (request.isEmpty())
+        {
+            logLine ("empty request -> closed");
             return;                            // 预连接 / 空连接：丢弃
+        }
 
         const juce::String head (request);
 
