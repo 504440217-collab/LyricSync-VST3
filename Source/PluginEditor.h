@@ -440,6 +440,7 @@ private:
     std::vector<OnlineLyrics::Result> searchResults;
     int    searchSel    = -1;
     int    searchScroll = 0;
+    bool   searchListOpen = false;   // 竖版结果浮层是否展开（点选/点空白收回）
     juce::String searchDiag;                 // 失败时显示给用户的诊断串
     double searchStartedMs = 0.0;            // 看门狗：请求卡住时自动解锁
     int    searchToken = 0;                  // 过期回调不再生效
