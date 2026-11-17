@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.4.6";
+    const char* const kVersion = "2.4.7";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -1073,7 +1073,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
 
     setStartButton   .setButtonText (tr (Lang::TextId::setStart));
     annotateButton   .setButtonText (tr (annotateMode ? Lang::TextId::tapFinish
-                                                      : Lang::TextId::annotateShort));
+                                                      : Lang::TextId::annotate));
     onlineLyricsButton.setButtonText (tr (Lang::TextId::onlineLyrics));
     standalonePlayButton.setButtonText (tr (processor.standalonePlaying.load()
                                                 ? Lang::TextId::standalonePause
@@ -3572,13 +3572,6 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
                 g.setColour (palette.accent);
                 g.drawRoundedRectangle (r.expanded (1.5f), 6.0f, 1.6f);
             }
-            else if (thisCurrent)
-            {
-                // 正在演唱的句子：细描边提示歌曲位置
-                g.setColour (palette.accent.withAlpha (0.45f));
-                g.drawRoundedRectangle (r, 5.0f, 1.0f);
-            }
-
             g.setColour (thisEditing ? palette.accent.withAlpha (0.55f)
                        : thisPointer ? palette.accent.withAlpha (0.40f)
                                      : palette.text.withAlpha (0.10f));
