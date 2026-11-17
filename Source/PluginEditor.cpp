@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.3.3";
+    const char* const kVersion = "2.3.4";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -3527,12 +3527,18 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
     //---- 已记录列表（可点，点一行就从那一句重打）-------------------------
     const auto ids = tapListIndices();
 
-    // 播放头所在的那一句：最后一个「时间 <= displayTime」的已记录行
+    // 播放头所在的那一句：用原始时间轴做参照（打轴中时间码被清空也能对上）
     int currentLine = -1;
 
-    for (int i = 0; i < static_cast<int> (tapTimes.size()); ++i)
-        if (tapTimes[(size_t) i] >= 0.0 && tapTimes[(size_t) i] <= displayTime + 0.001)
+    for (int i = 0; i < static_cast<int> (tapLines.size()); ++i)
+    {
+        const double ref = i < static_cast<int> (tapOriginalTimes.size())
+                             && tapOriginalTimes[(size_t) i] >= 0.0
+                           ? tapOriginalTimes[(size_t) i] : tapTimes[(size_t) i];
+
+        if (ref >= 0.0 && ref <= displayTime + 0.001)
             currentLine = i;
+    }
 
     if (! rows.empty())
     {
@@ -3593,14 +3599,23 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
             {
                 // 侧栏两行：第一行时间码，第二行歌词，右边留给环形重打钮
                 const auto textW = ri.getWidth() - static_cast<int> (armRect.getWidth()) - 4;
+                const bool stamped = tapTimes[(size_t) li] >= 0.0;
+                const double refT  = stamped ? tapTimes[(size_t) li]
+                                   : (li < static_cast<int> (tapOriginalTimes.size())
+                                        ? tapOriginalTimes[(size_t) li] : -1.0);
 
-                g.setColour (thisArmed ? palette.warn : palette.accent);
+                g.setColour (thisArmed ? palette.warn
+                           : stamped  ? palette.accent
+                                      : palette.faint);      // 未重打：原始时间灰显
                 g.setFont (uiFont (10.5f, true));
-                g.drawText (formatTimecode (tapTimes[(size_t) li]),
+                g.drawText (refT >= 0.0 ? formatTimecode (refT)
+                                        : juce::String ("--:--.--"),
                             juce::Rectangle<int> (ri.getX(), ri.getY(), textW, 19),
                             juce::Justification::centredLeft, false);
 
-                g.setColour (thisArmed ? palette.text : palette.dim);
+                g.setColour (thisArmed ? palette.text
+                           : stamped  ? palette.dim
+                                      : palette.dim.withAlpha (0.62f));
                 g.setFont (uiFont (10.5f));
                 g.drawText (tapLines[(size_t) li],
                             juce::Rectangle<int> (ri.getX(), ri.getY() + 19, textW, 19),
@@ -3608,13 +3623,23 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
             }
             else
             {
-                g.setColour (thisArmed ? palette.warn : palette.accent);
+                const bool stamped2 = tapTimes[(size_t) li] >= 0.0;
+                const double refT2  = stamped2 ? tapTimes[(size_t) li]
+                                    : (li < static_cast<int> (tapOriginalTimes.size())
+                                         ? tapOriginalTimes[(size_t) li] : -1.0);
+
+                g.setColour (thisArmed ? palette.warn
+                           : stamped2  ? palette.accent
+                                       : palette.faint);
                 g.setFont (uiFont (10.5f, true));
-                g.drawText (formatTimecode (tapTimes[(size_t) li]),
+                g.drawText (refT2 >= 0.0 ? formatTimecode (refT2)
+                                         : juce::String ("--:--.--"),
                             ri.removeFromLeft (92),
                             juce::Justification::centredLeft, false);
 
-                g.setColour (thisArmed ? palette.text : palette.dim);
+                g.setColour (thisArmed ? palette.text
+                           : stamped2  ? palette.dim
+                                       : palette.dim.withAlpha (0.62f));
                 g.setFont (uiFont (10.5f));
                 g.drawText (tapLines[(size_t) li],
                             ri.withTrimmedLeft (6).withTrimmedRight (static_cast<int> (armRect.getWidth()) + 4),
@@ -4379,9 +4404,15 @@ void LyricSyncEditor::timerCallback()
         {
             int playingLine = -1;
 
-            for (int i = 0; i < static_cast<int> (tapTimes.size()); ++i)
-                if (tapTimes[(size_t) i] >= 0.0 && tapTimes[(size_t) i] <= displayTime + 0.001)
+            for (int i = 0; i < static_cast<int> (tapLines.size()); ++i)
+            {
+                const double ref = i < static_cast<int> (tapOriginalTimes.size())
+                                     && tapOriginalTimes[(size_t) i] >= 0.0
+                                   ? tapOriginalTimes[(size_t) i] : tapTimes[(size_t) i];
+
+                if (ref >= 0.0 && ref <= displayTime + 0.001)
                     playingLine = i;
+            }
 
             if (playingLine >= 0)
                 keepTapRowVisible (playingLine);
@@ -7330,9 +7361,12 @@ std::vector<int> LyricSyncEditor::tapListIndices() const
     const bool v = (orientation == Orientation::vertical);
     const int  maxRows = v ? 4 : 7;
 
-    for (int i = 0; i < static_cast<int> (tapTimes.size()); ++i)
-        if (tapTimes[(size_t) i] >= 0.0)
-            ids.push_back (i);
+    // 全部歌词行都列出来：没重打的行灰显并参考原始时间码，
+    // 重打过的行用新时间码高亮（进入打轴时时间码被清空，但列表不能空）
+    const int total = static_cast<int> (tapLines.size());
+
+    for (int i = 0; i < total; ++i)
+        ids.push_back (i);
 
     const int n = static_cast<int> (ids.size());
 
@@ -7370,13 +7404,7 @@ juce::Rectangle<float> LyricSyncEditor::tapListTrack (juce::Rectangle<float> are
 
 int LyricSyncEditor::tapListTotal() const
 {
-    int total = 0;
-
-    for (auto t : tapTimes)
-        if (t >= 0.0)
-            ++total;
-
-    return total;
+    return static_cast<int> (tapLines.size());
 }
 
 int LyricSyncEditor::tapListMaxScroll() const
@@ -7430,12 +7458,7 @@ void LyricSyncEditor::syncTapToPlayhead (double t)
 /** 让 lineId 对应的行保持在列表可见窗口里（跟随播放头 / 预备重打共用）。 */
 void LyricSyncEditor::keepTapRowVisible (int lineId)
 {
-    std::vector<int> ids;
-
-    for (int i = 0; i < static_cast<int> (tapTimes.size()); ++i)
-        if (tapTimes[(size_t) i] >= 0.0)
-            ids.push_back (i);
-
+    const int n = static_cast<int> (tapLines.size());
     const bool v = (orientation == Orientation::vertical);
     const int  maxRows = v ? 4 : 7;
     const int  n = static_cast<int> (ids.size());
@@ -7458,15 +7481,9 @@ void LyricSyncEditor::keepTapRowVisible (int lineId)
 
 void LyricSyncEditor::scrollTapList (int deltaRows)
 {
-    std::vector<int> all;
-
-    for (int i = 0; i < static_cast<int> (tapTimes.size()); ++i)
-        if (tapTimes[(size_t) i] >= 0.0)
-            all.push_back (i);
-
     const bool v = (orientation == Orientation::vertical);
     const int  maxRows = v ? 4 : 7;
-    const int  maxScroll = juce::jmax (0, static_cast<int> (all.size()) - maxRows);
+    const int  maxScroll = juce::jmax (0, static_cast<int> (tapLines.size()) - maxRows);
 
     const int next = juce::jlimit (0, maxScroll, tapListScroll + deltaRows);
 
