@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.0.8";
+    const char* const kVersion = "2.0.9";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -628,8 +628,7 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
 
     // 独立版（Standalone）没有宿主时间轴，JUCE 自带的假播放头只会一直往前跑。
     // 用 JUCEApplicationBase 运行时判断（VST3 里为 false），启用内置时钟与走带控件。
-    standaloneMode = juce::JUCEApplicationBase::isStandaloneApp()
-                  || juce::JUCEApplicationBase::getInstance() != nullptr;
+    standaloneMode = juce::JUCEApplicationBase::isStandaloneApp();
 
     if (standaloneMode)
         processor.enableStandaloneTransport();
@@ -1327,7 +1326,7 @@ void LyricSyncEditor::updateVisibility()
     // 纯享模式把上面这些都隐藏过，回来必须逐个恢复；
     // 这三个 Label 不在上面那批里，之前漏掉，导致退出全屏后提示词永久消失。
     fileLabel .setVisible (false);   // 顶部文件信息行按用户要求横竖屏都移除
-    audioLabel.setVisible (normal);
+    audioLabel.setVisible (false);   // 「音频 xx:xx」按用户要求横竖屏都移除
     hintLabel .setVisible (false);   // 左下角功能介绍按用户要求移除
 
     applyTextButton .setVisible (editing && ! overlay);
@@ -1968,6 +1967,7 @@ void LyricSyncEditor::resized()
             castButton    .setBounds (scaledRect (tools.getX() + (w4 + 4.0f) * 3.0f, tools.getY(),
                                                   w4, tools.getHeight()));
 
+            // 独立版竖屏才显示走带；VST3 里 standaloneMode 为 false，按钮已隐藏
             standalonePlayButton.setBounds (scaledRect (ox + 22, 566, 88, 30));
             standaloneSeekBar = { ox + 120.0f, 566.0f, 458.0f, 30.0f };
         }
@@ -5779,6 +5779,7 @@ void LyricSyncEditor::setOrientation (Orientation next)
 
     applyWindowSize();
     refreshLookAndFeel();
+    updateVisibility();     // 横竖屏切换后必须重算控件可见性，否则会残留上一版的控件
     resized();
     repaint();
 }
