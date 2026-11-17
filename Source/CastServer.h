@@ -96,9 +96,10 @@ private:
     void handleClient (juce::StreamingSocket& client)
     {
         char buf[2048] = {};
-        // read 的第 3 参是「必须收满才返回」的布尔量：传 true 会一直卡到超时，
-        // 请求排队把服务堵死。这里必须传 false（有数据就返回）。
-        const int n = client.read (buf, sizeof (buf) - 1, false, 1500);
+        // read 的第 3 参是「必须收满才返回」：传 true 会一直等满缓冲区，
+        // 浏览器的请求只有几百字节，永远等不满 —— 服务被彻底堵死。
+        // 传 false：socket 已就绪（waitUntilReady 通过），有多少读多少。
+        const int n = client.read (buf, sizeof (buf) - 1, false);
 
         if (n <= 0)
             return;
