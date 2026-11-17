@@ -18,7 +18,7 @@
 class CastServer : private juce::Thread
 {
 public:
-    CastServer() : juce::Thread ("LyricSyncCast") {}
+    CastServer() : juce::Thread ("LyricSyncCast"), castPool (3) {}
 
     ~CastServer() override { stop(); }
 
@@ -56,6 +56,8 @@ public:
             stopThread (1500);
         }
 
+        castPool.removeAllJobs (true, 1000);
+
         if (listener != nullptr)
         {
             listener->close();
@@ -68,6 +70,7 @@ public:
 
     // 编辑器（GUI 线程）写、服务线程读，全部走这把锁
     juce::CriticalSection dataLock;
+    juce::ThreadPool   castPool;      // 每个客户端连接一个短任务，互不阻塞
     juce::String lyricsJson = "{\"v\":0,\"lines\":[]}";
     juce::String stateJson  = "{\"t\":0.0,\"v\":0}";
 
@@ -87,25 +90,42 @@ private:
             if (client == nullptr)
                 continue;
 
-            handleClient (*client);
-            client->close();
-            delete client;
+            // 每个连接丢进线程池，慢客户端不阻塞其它设备
+            castPool.addJob ([this, client]()
+            {
+                handleClient (*client);
+                client->close();
+                delete client;
+            });
         }
     }
 
     void handleClient (juce::StreamingSocket& client)
     {
-        char buf[2048] = {};
-        // read 的第 3 参是「必须收满才返回」：传 true 会一直等满缓冲区，
-        // 浏览器的请求只有几百字节，永远等不满 —— 服务被彻底堵死。
-        // 传 false：socket 已就绪（waitUntilReady 通过），有多少读多少。
-        const int n = client.read (buf, sizeof (buf) - 1, false);
+        // accept 后数据往往晚几毫秒才到，立刻读会读到空包；
+        // 循环读到「完整请求头」（\r\n\r\n）或 1.5s 超时为止
+        juce::String request;
+        const double deadline = juce::Time::getMillisecondCounterHiRes() + 1500.0;
 
-        if (n <= 0)
+        while (juce::Time::getMillisecondCounterHiRes() < deadline)
+        {
+            char buf[1024] = {};
+            const int n = client.read (buf, sizeof (buf) - 1, false);
+
+            if (n > 0)
+                request += juce::String::fromUTF8 (buf, (size_t) n);
+
+            if (request.contains ("\r\n\r\n"))
+                break;
+
+            if (n <= 0)
+                juce::Thread::sleep (10);
+        }
+
+        if (request.isEmpty())
             return;
 
-        buf[n] = '\0';
-        const juce::String head (buf);
+        const juce::String head (request);
 
         // "GET /path HTTP/1.1"
         const int sp1 = head.indexOfChar (' ');
@@ -158,19 +178,24 @@ display:flex;flex-direction:column;align-items:center;justify-content:center;ove
 #brand{position:fixed;top:16px;left:20px;font-size:14px;color:#3e3e46;letter-spacing:.2px}
 #prev,#next{font-size:24px;color:#3e3e46;margin:18px 0;max-width:90vw;text-align:center;
 white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#status{position:fixed;top:16px;right:20px;font-size:12px;color:#3e3e46}
 #cur{font-size:7vw;font-weight:600;color:#63636d;margin:24px 0;max-width:92vw;
 text-align:center;line-height:1.5}
 #cur span.on{color:#f2f2f4}
 </style></head><body><div id="brand">&#9679; LyricSync</div>
+<div id="status">连接中…</div>
 <div id="prev"></div><div id="cur"></div><div id="next"></div>
 <script>
-let v=-1,lines=[],pi=-2;
+let v=-1,lines=[],pi=-2,ok=false;
+const st=document.getElementById('status');
 async function tick(){
  try{
   const s=await (await fetch('/state')).json();
-  if(s.v!==v){v=s.v;const d=await (await fetch('/lyrics')).json();lines=d.lines||[];}
+  if(!ok){ok=true;st.textContent='已连接宿主';}
+  if(s.v!==v){v=s.v;const d=await (await fetch('/lyrics')).json();lines=d.lines||[];
+    st.textContent='已连接宿主 · '+lines.length+' 句歌词';}
   render(s.t);
- }catch(e){}
+ }catch(e){ok=false;st.textContent='连接断开，正在重试…';}
  setTimeout(tick,120);
 }
 function render(t){
