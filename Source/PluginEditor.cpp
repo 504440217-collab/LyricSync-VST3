@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.2.3";
+    const char* const kVersion = "2.2.4";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -791,14 +791,6 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     searchTitleEditor.onReturnKey  = [this] { startSearch(); };
     searchArtistEditor.onReturnKey = [this] { startSearch(); };
 
-    searchTitleEditor.onFocusGained = [this]
-    {
-        if (! searchResults.empty() || searchBusy)
-        {
-            searchListOpen = true;      // 回到搜索框时重新展开列表
-            repaint();
-        }
-    };
     customUrlEditor.onReturnKey    = [this] { commitCustomUrl(); };
     lxUrlEditor.onReturnKey        = [this] { commitCustomUrl(); };
     customUrlEditor.setText (customSearchUrl, false);
@@ -4871,6 +4863,15 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
             searchListOpen = false;
             repaint();
         }
+    }
+
+    // 点回搜索框：重新展开结果列表
+    if (orientation == Orientation::vertical && ! searchListOpen
+        && e.eventComponent == &searchTitleEditor
+        && (! searchResults.empty() || searchBusy))
+    {
+        searchListOpen = true;
+        repaint();
     }
 
     // 文本框右键：显示跟随语言的菜单
