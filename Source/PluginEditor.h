@@ -24,9 +24,21 @@ public:
     float scale = 1.0f;
     juce::String typeface { "Microsoft YaHei UI" };
 
-    /** 提示框（tooltip）用侧栏同款中文字体，默认字体没有汉字字形会显示成方框。 */
-    juce::Font getTooltipFont (const juce::String&) override
-    { return juce::Font (typeface, 12.5f, juce::Font::plain); }
+    /** 提示框（tooltip）用侧栏同款中文字体：默认无衬线字体没有汉字字形，会显示成方框。 */
+    void drawTooltip (juce::Graphics& g, const juce::String& text,
+                      int width, int height) override
+    {
+        g.setColour (findColour (juce::TooltipWindow::backgroundColourId));
+        g.fillRoundedRectangle (0.0f, 0.0f, (float) width, (float) height, 6.0f);
+        g.setColour (findColour (juce::TooltipWindow::outlineColourId));
+        g.drawRoundedRectangle (0.5f, 0.5f, (float) width - 1.0f, (float) height - 1.0f,
+                                6.0f, 1.0f);
+
+        g.setColour (findColour (juce::TooltipWindow::textColourId));
+        g.setFont (juce::Font (typeface, 12.5f, juce::Font::plain));
+        g.drawFittedText (text, 8, 4, width - 16, height - 8,
+                          juce::Justification::centred, 4);
+    }
 
     juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
     juce::Font getComboBoxFont   (juce::ComboBox&) override;

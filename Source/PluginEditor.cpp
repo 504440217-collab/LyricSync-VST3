@@ -1824,7 +1824,8 @@ void LyricSyncEditor::resized()
                                                      refresh.getX() - box.getX() - 36.0f,
                                                      box.getHeight() - 10.0f));
 
-            lxRefreshButton.setBounds (scaledRect (refresh.reduced (1.0f)));
+            lxRefreshButton.setBounds (scaledRect (refresh.getX(), refresh.getY(),
+                                                    refresh.getWidth(), refresh.getHeight()));
         }
 
         //---- 起点：文字 + 设起点 + 撤销 ----
@@ -1989,7 +1990,8 @@ void LyricSyncEditor::resized()
                                                      refresh.getX() - box.getX() - 36.0f,
                                                      box.getHeight() - 10.0f));
 
-            lxRefreshButton.setBounds (scaledRect (refresh.reduced (1.0f)));
+            lxRefreshButton.setBounds (scaledRect (refresh.getX(), refresh.getY(),
+                                                    refresh.getWidth(), refresh.getHeight()));
 
             const auto start = sideStartRow();
             const float undoW = 26.0f;
