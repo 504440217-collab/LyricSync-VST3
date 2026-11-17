@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.3.6";
+    const char* const kVersion = "2.3.7";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -4389,33 +4389,50 @@ void LyricSyncEditor::timerCallback()
 
     if (tapMode)
     {
+        // 全新歌词（没有原始时间码）：右侧歌词不跟随播放头，
+        // 静止显示打轴指针那一句，打一句走一句（1.9 的打轴方式）
+        if (tapFresh)
+        {
+            currentIndex = tapIndex;
+            displayIndex = static_cast<float> (tapIndex);
+        }
+
         // 宿主里点时间轴 / 拖播放头时，displayTime 会突然跳一大截，
         // 而打轴指针只在打点时才动 —— 于是歌词停在上一次打点的位置。
         // 这里把"与正常推进量差得太多"判为跳转，跟着把指针挪到对应那一句。
-        if (tapFollowTime >= 0.0 && std::abs ((displayTime - tapFollowTime) - dt) > 0.60)
+        // （全新打轴时不做这个同步：指针只跟着打点走）
+        if (! tapFresh && tapFollowTime >= 0.0
+            && std::abs ((displayTime - tapFollowTime) - dt) > 0.60)
             syncTapToPlayhead (displayTime);
 
         tapFollowTime = displayTime;
 
-        // 列表跟随播放头：正在唱的那一句始终保持在可见窗口里
-        // （用户手动滚过列表后暂停 4 秒，不去抢他的位置）
+        // 列表跟随：全新打轴跟「指针」那一行；重打模式跟「正在唱」的那一句
+        // （用户手动滚过列表后暂停几秒，不去抢他的位置）
         if (! tapListDragging
             && juce::Time::getMillisecondCounterHiRes() > tapListHoldUntilMs)
         {
-            int playingLine = -1;
-
-            for (int i = 0; i < static_cast<int> (tapLines.size()); ++i)
+            if (tapFresh)
             {
-                const double ref = i < static_cast<int> (tapOriginalTimes.size())
-                                     && tapOriginalTimes[(size_t) i] >= 0.0
-                                   ? tapOriginalTimes[(size_t) i] : tapTimes[(size_t) i];
-
-                if (ref >= 0.0 && ref <= displayTime + 0.001)
-                    playingLine = i;
+                keepTapRowVisible (tapIndex);  // 全新打轴：列表跟着指针走
             }
+            else
+            {
+                int playingLine = -1;
 
-            if (playingLine >= 0)
-                keepTapRowVisible (playingLine);
+                for (int i = 0; i < static_cast<int> (tapLines.size()); ++i)
+                {
+                    const double ref = i < static_cast<int> (tapOriginalTimes.size())
+                                         && tapOriginalTimes[(size_t) i] >= 0.0
+                                       ? tapOriginalTimes[(size_t) i] : tapTimes[(size_t) i];
+
+                    if (ref >= 0.0 && ref <= displayTime + 0.001)
+                        playingLine = i;
+                }
+
+                if (playingLine >= 0)
+                    keepTapRowVisible (playingLine);
+            }
         }
 
         const auto want = tr (processor.isPlaying.load() ? Lang::TextId::tapHostPause
@@ -5184,6 +5201,14 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 
     if (tapMode)
     {
+        // 行内编辑器 / 应用 / 取消按钮的点击不往外传：
+        // 否则点进文本框想改字，会被当成「点其它地方」立刻关闭编辑
+        if (e.eventComponent == &tapTextEditor || e.eventComponent == &tapTimeEditor
+            || e.eventComponent == &tapRowRestampButton
+            || e.eventComponent == &tapRowApplyButton
+            || e.eventComponent == &tapRowCancelButton)
+            return;
+
         // 正在编辑某一行：点击其它地方直接退出编辑（不必点「取消」）
         if (tapEditIndex >= 0)
             closeTapRowEditing();
@@ -5251,6 +5276,7 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 
             tapListSelected = ids[(size_t) i];   // 单击 = 选中
             tapListLastClickMs = nowMs;
+            tapListHoldUntilMs = nowMs + 2000.0; // 暂停跟随，双击的两次点击之间列表不跑
             repaint();
             return;
         }
@@ -6455,6 +6481,11 @@ void LyricSyncEditor::enterTapMode()
     // 没有重打的句子在「完成」时自动沿用原始时间轴
     tapOriginalTimes = tapTimes;
 
+    tapFresh = true;                      // 原始时间轴全是空的 = 全新打轴
+
+    for (auto t : tapOriginalTimes)
+        if (t >= 0.0) { tapFresh = false; break; }
+
     for (auto& t : tapTimes)
         t = -1.0;
 
@@ -7577,6 +7608,7 @@ void LyricSyncEditor::finishTapMode()
     tapLines.clear();
     tapTimes.clear();
     tapOriginalTimes.clear();
+    tapFresh = false;
     tapIndex = 0;
     tapEditIndex = -1;
     tapArmIndex = -1;
@@ -7606,6 +7638,7 @@ void LyricSyncEditor::exitTapMode()
     tapLines.clear();
     tapTimes.clear();
     tapOriginalTimes.clear();   // 退出不保存：歌词文档从头到尾都没动过
+    tapFresh = false;
     tapIndex = 0;
     tapEditIndex = -1;
     tapArmIndex = -1;
