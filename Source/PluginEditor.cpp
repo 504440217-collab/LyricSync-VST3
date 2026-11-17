@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.4.2";
+    const char* const kVersion = "2.4.3";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -1382,7 +1382,7 @@ void LyricSyncEditor::updateVisibility()
     tapPauseButton    .setVisible (tapMain && demoMode);
     tapHostTransportButton.setVisible (false);   // 舞台下方走带条已有播放/暂停，这个键没用了
     tapRestampAllButton.setVisible (tapMain);
-    tapFinishButton .setVisible (tapMain);
+    tapFinishButton .setVisible (false);            // 修改实时生效，不再需要「完成」
     tapExitButton   .setVisible (tapMain);
 
     const bool rowEdit = tapMode && ! overlay && tapEditIndex >= 0;
@@ -1922,9 +1922,9 @@ void LyricSyncEditor::resized()
                 tapHostTransportButton.setBounds (scaledRect (sx, 160.0f, 0.0f, 0.0f));
                 tapPauseButton    .setBounds (scaledRect (sx + half + 4.0f, 160.0f, 0.0f, 0.0f));
 
-                // 退出 / 完成 落在侧栏底部
-                tapExitButton .setBounds (scaledRect (sx, baseH() - 62.0f, half, 28.0f));
-                tapFinishButton.setBounds (scaledRect (sx + half + 4.0f, baseH() - 62.0f, half, 28.0f));
+                // 退出键缩小、靠左下贴边；完成键已移除（修改实时生效）
+                tapExitButton  .setBounds (scaledRect (sx, baseH() - 40.0f, 96.0f, 28.0f));
+                tapFinishButton.setBounds (scaledRect (sx, baseH() - 40.0f, 0.0f, 0.0f));
             }
             else
             {
@@ -1943,7 +1943,6 @@ void LyricSyncEditor::resized()
                 put (tapNudgeBackButton, 62.0f);
                 put (tapNudgeFwdButton, 62.0f);
                 put (tapRestampAllButton, 84.0f);
-                put (tapFinishButton, 84.0f);
                 put (tapExitButton, 74.0f);
             }
         }
@@ -1973,7 +1972,7 @@ void LyricSyncEditor::resized()
             padStampButton     .setBounds (scaledRect (ox + 22, 566, 150, 30));
             tapUndoButton      .setBounds (scaledRect (ox + 180, 566, 120, 30));
             tapRestartButton   .setBounds (scaledRect (ox + 308, 566, 120, 30));
-            tapFinishButton    .setBounds (scaledRect (ox + 436, 566, 120, 30));
+            tapFinishButton    .setBounds (scaledRect (ox + 436, 566, 0.0f, 0.0f));
 
             tapNudgeBackButton .setBounds (scaledRect (ox + 22, 602, 96, 30));
             tapNudgeFwdButton  .setBounds (scaledRect (ox + 126, 602, 96, 30));
@@ -5304,6 +5303,7 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
         }
 
         // 舞台：按下先不动，抬起时判定——原地点击 = 给这一句打轴，按住拖动 = 翻看歌词
+        // （点其它地方一律不打点：打点入口只有「记录本句」键和右侧歌词）
         if (stageArea().contains (p))
         {
             tapStagePress     = true;
@@ -5312,7 +5312,6 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
             return;
         }
 
-        stampTap();
         return;
     }
 
@@ -5554,8 +5553,7 @@ void LyricSyncEditor::mouseUp (const juce::MouseEvent& e)
             return;
         }
 
-        stampTap();        // 点在空白处：照旧给指针那一句打点
-        return;
+        return;    // 点在舞台空白处：不打点
     }
     if (hudDrag)
     {
@@ -5709,11 +5707,10 @@ bool LyricSyncEditor::keyPressed (const juce::KeyPress& key)
 
     if (tapMode && ! settingsOpen && ! aboutOpen)
     {
-        if (key.getKeyCode() == juce::KeyPress::spaceKey
-            || key.getKeyCode() == juce::KeyPress::returnKey)
+        // 空格只负责播放/暂停；打点只靠鼠标（「记录本句」键或点歌词）
+        if (key.getKeyCode() == juce::KeyPress::spaceKey)
         {
-            grabKeyboardFocus();
-            stampTap();
+            toggleHostTransport();
             return true;
         }
 
@@ -6603,7 +6600,35 @@ void LyricSyncEditor::stampTap()
     if (late)
         lastWarning = tr (Lang::TextId::tapTimeOrder) + "  (" + formatTimecode (t) + ")";
 
+    syncTapLyricsToDoc();
     repaint();
+}
+
+/** 打轴过程中的实时回写：已打的新时间 + 未打的沿用原始时间，合并写回歌词文档。 */
+void LyricSyncEditor::syncTapLyricsToDoc()
+{
+    bool any = false;
+
+    for (auto t : tapTimes)
+        if (t >= 0.0) { any = true; break; }
+
+    if (! any || tapLines.empty())
+        return;
+
+    std::vector<double> merged (tapTimes);
+
+    for (size_t i = 0; i < merged.size(); ++i)
+        if (! std::isfinite (merged[i]) || merged[i] < 0.0)
+            merged[i] = (i < tapOriginalTimes.size() && tapOriginalTimes[i] >= 0.0)
+                          ? tapOriginalTimes[i] : 0.0;
+
+    juce::String lrc;
+
+    for (size_t i = 0; i < tapLines.size(); ++i)
+        lrc << "[" << formatStamp (merged[i]) << "]" << tapLines[i] << "\n";
+
+    // setLyricsText 不触发整页重载，打轴界面继续用 tapLines/tapTimes 自己的副本
+    processor.setLyricsText (lrc, {}, language);
 }
 
 void LyricSyncEditor::undoStamp()
@@ -6614,6 +6639,7 @@ void LyricSyncEditor::undoStamp()
     --tapIndex;
     tapTimes[(size_t) tapIndex] = -1.0;
     keepTapRowVisible (tapIndex);
+    syncTapLyricsToDoc();
     repaint();
 }
 
@@ -7217,6 +7243,7 @@ void LyricSyncEditor::applyTapRow()
         tapLines[(size_t) i] = newText;
 
     tapTimes[(size_t) i] = t;
+    syncTapLyricsToDoc();
 
     // 指针跳到下一个"还没打"的句子，已记录的不会被覆盖
     int next = i + 1;
@@ -7323,6 +7350,7 @@ void LyricSyncEditor::nudgeTap (int deltaMs)
     tapTimes[(size_t) i] = juce::jmax (0.0, v);
     lastWarning = tr (Lang::TextId::tapNudged) + "  "
                  + (deltaMs >= 0 ? "+" : "") + juce::String (deltaMs) + " ms";
+    syncTapLyricsToDoc();
     repaint();
 }
 
@@ -7586,9 +7614,9 @@ juce::Rectangle<float> LyricSyncEditor::tapListArea() const
         const float rail = railWidth();
 
         // 侧栏：品牌 10..30、模式标题 36..56、记录本句 60..90、
-        // 两行操作 96..154、列表标题 162..178；列表从 184 起，到退出/完成上方为止。
+        // 两行操作 96..154、列表标题 162..178；列表从 184 起延伸到退出键上方。
         const float top    = 184.0f;
-        const float bottom = baseH() - 76.0f;
+        const float bottom = baseH() - 56.0f;
         return { 10.0f, top, rail - 26.0f, juce::jmax (60.0f, bottom - top) };
     }
 

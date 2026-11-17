@@ -202,6 +202,7 @@ private:
     void paintTapStage (juce::Graphics& g, juce::Rectangle<float> area);
     void paintTapList (juce::Graphics& g, const juce::Rectangle<float>& area, bool listInSide);
     void keepTapRowVisible (int lineId);                 // 让某行保持在列表可见窗口里
+    void syncTapLyricsToDoc();                           // 打轴修改实时写回歌词文档
     void paintSettings (juce::Graphics& g, juce::Rectangle<float> panel);
     void paintAbout    (juce::Graphics& g, juce::Rectangle<float> panel);
     void paintSearch   (juce::Graphics& g, juce::Rectangle<float> panel);
