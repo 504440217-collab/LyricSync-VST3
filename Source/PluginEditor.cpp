@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.2.2";
+    const char* const kVersion = "2.2.3";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -790,6 +790,15 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     }
     searchTitleEditor.onReturnKey  = [this] { startSearch(); };
     searchArtistEditor.onReturnKey = [this] { startSearch(); };
+
+    searchTitleEditor.onFocusGained = [this]
+    {
+        if (! searchResults.empty() || searchBusy)
+        {
+            searchListOpen = true;      // 回到搜索框时重新展开列表
+            repaint();
+        }
+    };
     customUrlEditor.onReturnKey    = [this] { commitCustomUrl(); };
     lxUrlEditor.onReturnKey        = [this] { commitCustomUrl(); };
     customUrlEditor.setText (customSearchUrl, false);
@@ -2558,8 +2567,12 @@ void LyricSyncEditor::paintResultsOverlay (juce::Graphics& g)
     if (area.getHeight() < 20.0f)
         return;
 
+    // 竖版：列表已收回就不画（选中歌词 / 点击空白处后收回）
+    if (vertical && ! searchListOpen)
+        return;
+
     // 竖版：结果浮在歌词上方，先画浮层底板（阴影 + 圆角卡片，轻微透明）
-    if (vertical && (! searchResults.empty() || searchBusy))
+    if (vertical && searchListOpen && (! searchResults.empty() || searchBusy))
     {
         const auto panel = area.expanded (6.0f);
 
@@ -2969,11 +2982,7 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
     g.setColour (palette.faint);
     g.setFont (uiFont (10.5f, true));
 
-    if (! zenMode && ! annotateMode && ! tapMode)
-        g.drawText (tr (Lang::TextId::currentLine),
-                    static_cast<int> (area.getX() + 30.0f),
-                    static_cast<int> (area.getY() + 15.0f), 200, 16,
-                    juce::Justification::centredLeft);
+    // 「当前行 / CURRENT LINE」标签按用户要求移除，只保留句数计数
 
     if (! doc.isEmpty() && ! zenMode && ! annotateMode && ! tapMode)
     {
@@ -4850,6 +4859,20 @@ void LyricSyncEditor::setAdvanceMode (int mode)
 //==============================================================================
 void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 {
+    // 竖版搜索结果浮层：点击列表以外的地方自动收回
+    if (orientation == Orientation::vertical && searchListOpen
+        && e.eventComponent == this && ! e.mods.isPopupMenu())
+    {
+        const auto p = toLogicalPoint (e.position);
+
+        if (! sideResultsArea().contains (p)
+            && ! sideSearchBox().expanded (4.0f).contains (p))
+        {
+            searchListOpen = false;
+            repaint();
+        }
+    }
+
     // 文本框右键：显示跟随语言的菜单
     {
         juce::TextEditor* te = (e.eventComponent == &editorBox)  ? &editorBox
@@ -4938,7 +4961,7 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
 
     // 搜索结果：点一条就直接载入
     if (e.eventComponent == this && ! editing && ! tapMode && ! searchResults.empty()
-        && (orientation == Orientation::vertical || railOpenNow()))
+        && (railOpenNow() || searchListOpen))
     {
         const auto p = toLogicalPoint (e.position);
         const int idx = sideResultAt (p);
@@ -5311,6 +5334,7 @@ void LyricSyncEditor::mouseWheelMove (const juce::MouseEvent& e,
 
     // 内联搜索结果：滚轮翻页（不按住 Ctrl，也不需要点进面板）
     if (! mod && e.eventComponent == this && ! searchResults.empty()
+        && (railOpenNow() || searchListOpen)
         && sideResultsArea().transformedBy (uiTransform).contains (e.position))
     {
         const int total = static_cast<int> (searchResults.size());
@@ -5660,6 +5684,7 @@ void LyricSyncEditor::startSearch()
     searchSel = -1;
     searchScroll = 0;
     searchDiag = {};
+    searchListOpen = true;              // 开始搜索即展开结果列表
     searchStatus = tr (Lang::TextId::onlineSearching);
     repaint();
 
@@ -5747,6 +5772,10 @@ void LyricSyncEditor::loadSelectedResult()
 {
     if (searchBusy || searchSel < 0 || searchSel >= static_cast<int> (searchResults.size()))
         return;
+
+    searchListOpen = false;             // 选中歌词后列表自动收回
+    searchResults.clear();              // 清空结果，浮层随之消失
+    searchSel = -1;
 
     const auto result = searchResults[(size_t) searchSel];
 
