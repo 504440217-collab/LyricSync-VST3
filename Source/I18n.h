@@ -256,6 +256,7 @@ namespace Lang
         onlineSelectHint,
         onlineSourceHint,
         onlineSongPlaceholder,
+        searchTip,
         onlineArtistPlaceholder,
         onlineUrlPlaceholder,
         setCustomUrl,

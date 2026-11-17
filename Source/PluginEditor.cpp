@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.2.0";
+    const char* const kVersion = "2.2.1";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -1197,7 +1197,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
     simplifyToggle    .setTooltip (tr (Lang::TextId::onlineSimplifyHint));
     networkBox        .setTooltip (tr (Lang::TextId::netHint));
     searchLxButton    .setTooltip (tr (Lang::TextId::lxButtonHint));
-    searchTitleEditor .setTooltip (tr (Lang::TextId::onlineSongPlaceholder));
+    searchTitleEditor .setTooltip (tr (Lang::TextId::searchTip));
     hintLabel       .setTooltip (tr (Lang::TextId::hintClick));
 
     if (reloadDemoLyrics && usingDemoLyrics)
@@ -2266,6 +2266,15 @@ void LyricSyncEditor::paint (juce::Graphics& g)
 
 void LyricSyncEditor::paintOverChildren (juce::Graphics& g)
 {
+    // 竖版搜索结果浮层：最后画，盖在歌词上方（轻微透明）
+    if (orientation == Orientation::vertical && ! zenMode && ! editing && ! tapMode
+        && ! annotateMode && ! settingsOpen && ! aboutOpen)
+    {
+        const juce::Graphics::ScopedSaveState state (g);
+        g.addTransform (uiTransform);
+        paintResultsOverlay (g);
+    }
+
     // 「着色」按钮只保留文字，不再在前面画刷子图标；
     // 进入着色模式时用一圈强调色描边提示状态。
     if (! annotateButton.isVisible() || ! annotateMode)
@@ -2528,22 +2537,36 @@ void LyricSyncEditor::paintSidebarSearch (juce::Graphics& g)
 
     // 右侧「洛雪取词」图标：改用真正的按钮（音符图标 + 悬停提示），见 lxRefreshButton
 
-    //---- 结果列表 ----------------------------------------------------------
+    // 竖版的结果浮层要在歌词上方，移到 paintOverChildren 里画；横版就地画
+    if (orientation != Orientation::vertical)
+        paintResultsOverlay (g);
+}
+
+//==============================================================================
+//  搜索结果列表：竖版作为浮层最后绘制（盖在歌词上方），横版画在侧栏里
+//==============================================================================
+void LyricSyncEditor::paintResultsOverlay (juce::Graphics& g)
+{
+    const bool light = palette.text.getPerceivedBrightness() < 0.5f;
+    const auto txt2  = light ? juce::Colour (0xff5d6883) : juce::Colour (0xffa1a1aa);
+    const auto txt3  = light ? juce::Colour (0xff98a2b8) : juce::Colour (0xff63636d);
+    const auto line  = light ? juce::Colour (0xffd4dbea) : juce::Colour (0xff33333a);
+    const bool vertical = (orientation == Orientation::vertical);
+
     const auto area = sideResultsArea();
 
     if (area.getHeight() < 20.0f)
         return;
 
-    // 竖版：结果浮在歌词上方，先画浮层底板（阴影 + 圆角卡片）
-    if (orientation == Orientation::vertical
-        && (! searchResults.empty() || searchBusy))
+    // 竖版：结果浮在歌词上方，先画浮层底板（阴影 + 圆角卡片，轻微透明）
+    if (vertical && (! searchResults.empty() || searchBusy))
     {
         const auto panel = area.expanded (6.0f);
 
         g.setColour (juce::Colours::black.withAlpha (0.45f));
         g.fillRoundedRectangle (panel.translated (0.0f, 6.0f), 12.0f);
 
-        g.setColour (light ? juce::Colour (0xffffffff) : juce::Colour (0xff17171b));
+        g.setColour (light ? juce::Colour (0xe8ffffff) : juce::Colour (0xe017171b));
         g.fillRoundedRectangle (panel, 12.0f);
         g.setColour (line);
         g.drawRoundedRectangle (panel.reduced (0.5f), 12.0f, 1.0f);

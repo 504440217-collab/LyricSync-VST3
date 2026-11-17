@@ -176,6 +176,7 @@ private:
     void paintRailIcons (juce::Graphics& g);
     void toggleSidebar();
     void paintSidebarSearch (juce::Graphics& g);
+    void paintResultsOverlay (juce::Graphics& g);           // 搜索结果（竖版=歌词上方浮层）
     void paintStepperBox (juce::Graphics& g, juce::Rectangle<float> box,
                           const juce::String& value, bool active = false,
                           bool chevrons = false);

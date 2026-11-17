@@ -349,6 +349,7 @@ TABLE = [
     ("onlineSourceHint","酷狗按歌曲 hash 精确取词，LRCLIB 兜底；结果标有行数与「片段」提示；无网络时用本地载入或 LX Music",
                        "Kugou matches by song hash, LRCLIB as fallback; results show line counts and partial flags; use local files or LX Music offline"),
     ("onlineSongPlaceholder",   "例如：海阔天空", "e.g. Yesterday"),
+    ("searchTip",       "点击输入歌名 + 歌手名，回车搜索歌词", "Type title + artist, press Enter"),
     ("onlineArtistPlaceholder", "例如：Beyond（可留空）", "e.g. The Beatles (optional)"),
     ("onlineUrlPlaceholder",    "留空即用内置源", "Leave empty for built-in sources"),
     ("setCustomUrl",   "自定义服务", "Custom service"),
