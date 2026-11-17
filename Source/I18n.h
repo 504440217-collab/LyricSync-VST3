@@ -308,6 +308,10 @@ namespace Lang
         modeLabel,
         segWord,
         cast,
+        castTitle,
+        castHint,
+        castHint2,
+        castFail,
         castSoon,
         fontPx,
         searchResultsEmpty

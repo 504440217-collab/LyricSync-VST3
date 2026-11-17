@@ -17,7 +17,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.5.1";
+    const char* const kVersion = "2.5.2";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -686,7 +686,8 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
     }
 
     for (auto* b : { &orientButton, &undoSetStartButton, &logoButton,
-                     &closeSettingsButton, &closeAboutButton, &closeSearchButton })
+                     &closeSettingsButton, &closeAboutButton, &closeSearchButton,
+                     &castCloseButton })
     {
         b->addListener (this);
         addAndMakeVisible (*b);
@@ -1274,6 +1275,8 @@ void LyricSyncEditor::refreshLookAndFeel()
     closeAboutButton.hoverColour  = palette.text;
     // 搜索面板是浅色/白色底：X 不能再用默认的白色，否则浅色皮肤里几乎看不见
     closeSearchButton.normalColour = palette.text;
+    castCloseButton.normalColour = palette.dim;
+    castCloseButton.hoverColour  = palette.text;
     closeSearchButton.hoverColour  = palette.accent;
 
     orientHButton.setToggleState (orientation == Orientation::horizontal,
@@ -7359,7 +7362,7 @@ void LyricSyncEditor::startCast()
 
     if (! castServer.start (8089))
     {
-        lastWarning = "投屏服务启动失败：端口被占用";
+        lastWarning = tr (Lang::TextId::castFail);
         repaint();
         return;
     }
@@ -7479,7 +7482,7 @@ void LyricSyncEditor::paintCast (juce::Graphics& g)
 
     drawText (g, juce::Rectangle<float> (panel.getX() + 24.0f, panel.getY() + 16.0f,
                                          260.0f, 26.0f),
-              "投屏 · 局域网", 18.0f, palette.text, true, -1, {}, 1.0f,
+              tr (Lang::TextId::castTitle), 18.0f, palette.text, true, -1, {}, 1.0f,
               juce::Justification::centredLeft);
 
     // 二维码（白底卡片）
@@ -7512,11 +7515,11 @@ void LyricSyncEditor::paintCast (juce::Graphics& g)
 
     g.setColour (txt3);
     g.setFont (uiFont (11.0f));
-    g.drawText ("手机 / 平板 / 电视的浏览器扫码，或直接输入上面的网址",
+    g.drawText (tr (Lang::TextId::castHint),
                 panel.getX() + 20, panel.getY() + 350,
                 (int) panel.getWidth() - 40, 18, juce::Justification::centred, false);
 
-    g.drawText ("歌词逐句高亮，自动跟随播放 · 点右上角 × 关闭投屏",
+    g.drawText (tr (Lang::TextId::castHint2),
                 panel.getX() + 20, panel.getY() + 372,
                 (int) panel.getWidth() - 40, 18, juce::Justification::centred, false);
 }
