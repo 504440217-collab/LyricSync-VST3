@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.3.7";
+    const char* const kVersion = "2.3.8";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -7392,11 +7392,29 @@ std::vector<int> LyricSyncEditor::tapListIndices() const
     const bool v = (orientation == Orientation::vertical);
     const int  maxRows = v ? 4 : 7;
 
-    // 全部歌词行都列出来：没重打的行灰显并参考原始时间码，
-    // 重打过的行用新时间码高亮（进入打轴时时间码被清空，但列表不能空）
+    // 全部歌词行都列出来（进入打轴时时间码被清空，但列表不能空）：
+    // 打过轴的句子按新时间先后排在前面；没打过的句子按原顺序排在后面
     const int total = static_cast<int> (tapLines.size());
 
+    std::vector<std::pair<double, int>> stamped;
+    std::vector<int> unstamped;
+
     for (int i = 0; i < total; ++i)
+    {
+        if (i < static_cast<int> (tapTimes.size()) && tapTimes[(size_t) i] >= 0.0)
+            stamped.push_back ({ tapTimes[(size_t) i], i });
+        else
+            unstamped.push_back (i);
+    }
+
+    std::sort (stamped.begin(), stamped.end(),
+               [] (const std::pair<double, int>& a, const std::pair<double, int>& b)
+               { return a.first < b.first; });
+
+    for (const auto& st : stamped)
+        ids.push_back (st.second);
+
+    for (int i : unstamped)
         ids.push_back (i);
 
     const int n = static_cast<int> (ids.size());
