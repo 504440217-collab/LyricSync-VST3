@@ -122,7 +122,7 @@ private:
         // 1.5 秒没数据返回 -1。绕开 waitUntilReady 的不可靠（它会把真请求也当空）。
        #if JUCE_WINDOWS
         {
-            auto* raw = reinterpret_cast<SOCKET> (client.getRawSocketHandle());
+            const auto raw = (SOCKET) (juce::pointer_sized_int) client.getRawSocketHandle();
             DWORD timeoutMs = 1500;
 
             if (raw != INVALID_SOCKET)
