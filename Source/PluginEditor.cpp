@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.4.0";
+    const char* const kVersion = "2.4.1";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -3564,6 +3564,7 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
             const int  li = ids[(size_t) i];
 
             const bool thisEditing = (li == tapEditIndex);
+            const bool thisSel     = (li == tapListSelected && ! thisEditing);
             const bool thisPointer = (li == tapIndex && ! thisEditing);
             const bool thisCurrent = (li == currentLine && ! thisEditing
                                       && ! thisPointer);
