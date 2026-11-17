@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.3.4";
+    const char* const kVersion = "2.3.5";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -7461,7 +7461,6 @@ void LyricSyncEditor::keepTapRowVisible (int lineId)
     const int n = static_cast<int> (tapLines.size());
     const bool v = (orientation == Orientation::vertical);
     const int  maxRows = v ? 4 : 7;
-    const int  n = static_cast<int> (ids.size());
     const int  maxScroll = juce::jmax (0, n - maxRows);
 
     for (int p = 0; p < n; ++p)
