@@ -142,10 +142,38 @@ private:
        #endif
 
         juce::String request;
+
+       #if JUCE_WINDOWS
+        // 关键：JUCE 的 read() 每次都会把 socket 强制改回非阻塞（源码行为），
+        // 阻塞模式/接收超时全被覆盖 —— 所以这里直接用原生 recv。
+        // socket 已在上面设为阻塞 + SO_RCVTIMEO(1.5s)：有数据立刻返回，超时返回 -1。
+        {
+            const auto raw = (SOCKET) (juce::pointer_sized_int) client.getRawSocketHandle();
+
+            if (raw != INVALID_SOCKET)
+            {
+                for (int guard = 0; guard < 4; ++guard)
+                {
+                    char buf[1024] = {};
+                    const int n = ::recv (raw, buf, sizeof (buf) - 1, 0);
+
+                    if (n > 0)
+                    {
+                        request += juce::String::fromUTF8 (buf, (size_t) n);
+
+                        if (request.contains ("\r\n\r\n"))
+                            break;
+
+                        continue;
+                    }
+
+                    break;      // 0 = 对端关闭；-1 = 超时（预连接）或错误
+                }
+            }
+        }
+       #else
         const double rDeadline = juce::Time::getMillisecondCounterHiRes() + 1200.0;
 
-        // JUCE 的 read(..., false) 是「探一次立刻返回」，不会等数据，
-        // 所以必须自己轮询：读不到就 sleep 再试，等完整请求头或超时。
         while (juce::Time::getMillisecondCounterHiRes() < rDeadline)
         {
             char buf[1024] = {};
@@ -163,6 +191,7 @@ private:
                 juce::Thread::sleep (8);
             }
         }
+       #endif
 
         auto logLine = [] (const juce::String& text)
         {
@@ -248,6 +277,25 @@ private:
 
         const double wDeadline = juce::Time::getMillisecondCounterHiRes() + 4000.0;
 
+       #if JUCE_WINDOWS
+        const auto rawOut = (SOCKET) (juce::pointer_sized_int) client.getRawSocketHandle();
+
+        while (remaining > 0 && rawOut != INVALID_SOCKET
+               && juce::Time::getMillisecondCounterHiRes() < wDeadline)
+        {
+            const int sent = ::send (rawOut, ptr, remaining, 0);
+
+            if (sent <= 0)
+            {
+                juce::Thread::sleep (5);
+                continue;
+            }
+
+            ptr += sent;
+            remaining -= sent;
+            totalSent += sent;
+        }
+       #else
         while (remaining > 0 && juce::Time::getMillisecondCounterHiRes() < wDeadline)
         {
             const int sent = client.write (ptr, remaining);
@@ -262,6 +310,7 @@ private:
             remaining -= sent;
             totalSent += sent;
         }
+       #endif
 
         {
             juce::File::getSpecialLocation (juce::File::tempDirectory)
