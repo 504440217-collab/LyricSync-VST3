@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.1.0";
+    const char* const kVersion = "2.1.1";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -2203,7 +2203,7 @@ void LyricSyncEditor::paint (juce::Graphics& g)
         paintStandaloneTransport (g);
 
     // 走带读数条：编辑 / 打轴 / 弹面板时让位，其余时候常驻
-    if (! zenMode && ! editing && ! tapMode && ! annotateMode
+    if (! zenMode && ! editing && ! annotateMode
         && ! settingsOpen && ! aboutOpen && ! searchOpen)
         paintHud (g);
 
@@ -2848,7 +2848,9 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
         g.drawRoundedRectangle (area.reduced (0.5f), 22.0f, 1.2f);
     }
 
-    if (tapMode)
+    // 编辑模式：横版侧栏展开时舞台照常显示歌词 + 倒数点 + HUD（设计稿 pad 模式）；
+    // 收起态 / 竖版没有侧栏，仍用舞台上的打轴面板。
+    if (tapMode && !(orientation == Orientation::horizontal && railWidth() > 60.0f))
     {
         paintTapStage (g, area);
         return;
@@ -2862,13 +2864,13 @@ void LyricSyncEditor::paintStage (juce::Graphics& g, juce::Rectangle<float> area
     g.setColour (palette.faint);
     g.setFont (uiFont (10.5f, true));
 
-    if (! zenMode && ! annotateMode)
+    if (! zenMode && ! annotateMode && ! tapMode)
         g.drawText (tr (Lang::TextId::currentLine),
                     static_cast<int> (area.getX() + 30.0f),
                     static_cast<int> (area.getY() + 15.0f), 200, 16,
                     juce::Justification::centredLeft);
 
-    if (! doc.isEmpty() && ! zenMode && ! annotateMode)
+    if (! doc.isEmpty() && ! zenMode && ! annotateMode && ! tapMode)
     {
         g.setFont (uiFont (10.5f));
         g.drawText (juce::String (juce::jmax (0, currentIndex + 1)) + " / "
@@ -3775,9 +3777,10 @@ juce::Rectangle<float> LyricSyncEditor::hudBounds() const
 {
     const auto s = stageArea();
 
-    // 设计稿：left 20 / right 20 / bottom 14
-    return { s.getX() + 20.0f, s.getBottom() - 38.0f,
-             s.getWidth() - 40.0f, 24.0f };
+    // 设计稿：HUD 相对整个画布底部定位（bottom 14），不是舞台底部。
+    // 这样它和侧栏最底下那一排按钮（设置/着色/导出/投屏，在 baseH-44）平起。
+    const float y = baseH() - 14.0f - 24.0f;
+    return { s.getX() + 20.0f, y, s.getWidth() - 40.0f, 24.0f };
 }
 
 juce::Rectangle<float> LyricSyncEditor::hudPlayRect() const
@@ -4816,7 +4819,7 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
     }
 
     // 右下角读数条：播放/暂停、测速、撤销、拖动定位
-    if (! zenMode && ! editing && ! tapMode && ! annotateMode
+    if (! zenMode && ! editing && ! annotateMode
         && ! settingsOpen && ! aboutOpen && ! searchOpen
         && e.eventComponent == this)
     {
