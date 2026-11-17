@@ -2750,16 +2750,10 @@ void LyricSyncEditor::paintSidebar (juce::Graphics& g)
         g.drawText (tr (Lang::TextId::offsetLabel),
                     juce::Rectangle<float> (16.0f, 804.0f, 80.0f, 12.0f),
                     juce::Justification::centredLeft, false);
-        g.drawText (tr (Lang::TextId::offsetHint),
-                    juce::Rectangle<float> (145.0f, 804.0f, 148.0f, 12.0f),
-                    juce::Justification::centredRight, false);
 
         g.drawText (tr (Lang::TextId::fontSize),
                     juce::Rectangle<float> (307.0f, 756.0f, 80.0f, 12.0f),
                     juce::Justification::centredLeft, false);
-        g.drawText (tr (Lang::TextId::fontHint),
-                    juce::Rectangle<float> (306.0f, 756.0f, 278.0f, 12.0f),
-                    juce::Justification::centredRight, false);
 
         g.drawText (tr (Lang::TextId::modeLabel),
                     juce::Rectangle<float> (307.0f, 804.0f, 80.0f, 12.0f),
@@ -3538,19 +3532,6 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
     //---- 已记录列表（可点，点一行就从那一句重打）-------------------------
     const auto ids = tapListIndices();
 
-    // 播放头所在的那一句：用原始时间轴做参照（打轴中时间码被清空也能对上）
-    int currentLine = -1;
-
-    for (int i = 0; i < static_cast<int> (tapLines.size()); ++i)
-    {
-        const double ref = i < static_cast<int> (tapOriginalTimes.size())
-                             && tapOriginalTimes[(size_t) i] >= 0.0
-                           ? tapOriginalTimes[(size_t) i] : tapTimes[(size_t) i];
-
-        if (ref >= 0.0 && ref <= displayTime + 0.001)
-            currentLine = i;
-    }
-
     if (! rows.empty())
     {
 
@@ -3568,29 +3549,24 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
             const auto r  = rows[(size_t) i];
             const int  li = ids[(size_t) i];
 
+            // 高亮只保留一种：▶ 打轴指针（下一句要打的），其余不再额外亮
             const bool thisEditing = (li == tapEditIndex);
-            const bool thisSel     = (li == tapListSelected && ! thisEditing);
             const bool thisPointer = (li == tapIndex && ! thisEditing);
-            const bool thisCurrent = (li == currentLine && ! thisEditing
-                                      && ! thisPointer);
 
             g.setColour (thisEditing ? palette.accent.withAlpha (0.10f)
                        : thisPointer ? palette.accent.withAlpha (0.22f)
-                       : thisCurrent ? palette.accent.withAlpha (0.08f)
-                       : thisSel     ? palette.accent.withAlpha (0.16f)
                                      : palette.text.withAlpha (0.05f));
             g.fillRoundedRectangle (r, 5.0f);
 
             if (thisPointer)
             {
-                // ▶ 打轴指针：下一按空格就写这一句（最强提示）
+                // ▶ 打轴指针：下一按空格就写这一句
                 g.setColour (palette.accent);
                 g.drawRoundedRectangle (r.expanded (1.5f), 6.0f, 1.6f);
             }
 
             g.setColour (thisEditing ? palette.accent.withAlpha (0.55f)
                        : thisPointer ? palette.accent.withAlpha (0.40f)
-                       : thisSel     ? palette.accent.withAlpha (0.50f)
                                      : palette.text.withAlpha (0.10f));
             g.drawRoundedRectangle (r, 5.0f, 1.0f);
 
