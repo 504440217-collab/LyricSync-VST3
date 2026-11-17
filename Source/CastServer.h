@@ -150,6 +150,11 @@ private:
             const juce::ScopedLock sl (dataLock);
             body = lyricsJson;
         }
+        else if (path.startsWith ("/ping"))
+        {
+            body = "pong";
+            mime = "text/plain; charset=utf-8";
+        }
         else
         {
             body = pageHtml();
@@ -164,8 +169,25 @@ private:
             "Cache-Control: no-store\r\n"
             "Connection: close\r\n\r\n") + body;
 
+        // socket 的 write 可能只发出一部分（接收窗口小/缓冲满），
+        // 必须循环发送到全部写完，否则浏览器拿到半截页面（黑屏无字）
         const auto utf8 = bytes.toUTF8();
-        client.write (utf8.getAddress(), (int) utf8.sizeInBytes() - 1);
+        const char* ptr = utf8.getAddress();
+        int remaining = (int) utf8.sizeInBytes() - 1;
+
+        while (remaining > 0)
+        {
+            const int sent = client.write (ptr, remaining);
+
+            if (sent <= 0)
+            {
+                juce::Thread::sleep (5);
+                continue;
+            }
+
+            ptr += sent;
+            remaining -= sent;
+        }
     }
 
     static const char* pageHtml()
