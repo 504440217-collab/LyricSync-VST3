@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.3.2";
+    const char* const kVersion = "2.3.3";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -6420,16 +6420,14 @@ void LyricSyncEditor::enterTapMode()
     tapListScroll = 0;
     tapFollowTime = demoMode ? demoTime : displayTime;
 
-    // 已经打过轴的行保留时间，指针停到第一个还没打点的句子
-    {
-        int firstMissing = 0;
+    // 进入打轴：备份原始时间轴，然后暂时全部清空，从头开始打；
+    // 没有重打的句子在「完成」时自动沿用原始时间轴
+    tapOriginalTimes = tapTimes;
 
-        while (firstMissing < static_cast<int> (tapTimes.size())
-               && tapTimes[(size_t) firstMissing] >= 0.0)
-            ++firstMissing;
+    for (auto& t : tapTimes)
+        t = -1.0;
 
-        tapIndex = firstMissing;
-    }
+    tapIndex = 0;
 
     tapMode = true;
     editing = false;
@@ -7548,12 +7546,12 @@ void LyricSyncEditor::finishTapMode()
         return;
     }
 
-    for (auto& t : tapTimes)
-        if (! std::isfinite (t) || t < 0.0)
-            t = 0.0;
-
-    for (size_t i = 1; i < tapTimes.size(); ++i)
-        tapTimes[i] = juce::jmax (tapTimes[i], tapTimes[i - 1] + 0.05);
+    // 没重打的句子沿用原始时间轴；重打过的句子用新时间
+    for (size_t i = 0; i < tapTimes.size(); ++i)
+        if (! std::isfinite (tapTimes[i]) || tapTimes[i] < 0.0)
+            tapTimes[i] = (i < tapOriginalTimes.size()
+                             && tapOriginalTimes[i] >= 0.0)
+                            ? tapOriginalTimes[i] : 0.0;
 
     juce::String lrc;
     for (size_t i = 0; i < tapLines.size(); ++i)
@@ -7562,6 +7560,7 @@ void LyricSyncEditor::finishTapMode()
     tapMode = false;
     tapLines.clear();
     tapTimes.clear();
+    tapOriginalTimes.clear();
     tapIndex = 0;
     tapEditIndex = -1;
     tapArmIndex = -1;
@@ -7590,6 +7589,7 @@ void LyricSyncEditor::exitTapMode()
     tapMode = false;
     tapLines.clear();
     tapTimes.clear();
+    tapOriginalTimes.clear();   // 退出不保存：歌词文档从头到尾都没动过
     tapIndex = 0;
     tapEditIndex = -1;
     tapArmIndex = -1;

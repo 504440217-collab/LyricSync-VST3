@@ -471,6 +471,7 @@ private:
     int  tapListSelected = -1;            // 单击选中的已记录行（双击才进编辑）
     bool tapStagePress = false;           // 舞台按下，抬起时判定「点击打轴 / 拖动翻看」
     double tapListHoldUntilMs = 0.0;      // 手动滚动列表后暂停跟随的截止时间
+    std::vector<double> tapOriginalTimes; // 进入打轴时备份的原始时间轴（完成时回填未重打句）
     double tapListLastClickMs = 0.0;      // 上一击列表行的时间（自判双击用）
     juce::Point<float> tapStagePressPos;
     int  tapStagePressLine = -1;          // 按下时命中的歌词行
