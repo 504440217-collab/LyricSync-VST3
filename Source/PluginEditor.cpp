@@ -14,7 +14,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.3.9";
+    const char* const kVersion = "2.4.0";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -3564,23 +3564,26 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
             const int  li = ids[(size_t) i];
 
             const bool thisEditing = (li == tapEditIndex);
-            const bool thisSel     = (li == tapListSelected && ! thisEditing);
-            const bool thisCurrent = (li == currentLine && ! thisEditing);
+            const bool thisPointer = (li == tapIndex && ! thisEditing);
+            const bool thisCurrent = (li == currentLine && ! thisEditing
+                                      && ! thisPointer);
 
             g.setColour (thisEditing ? palette.accent.withAlpha (0.10f)
-                       : thisSel     ? palette.accent.withAlpha (0.16f)
+                       : thisPointer ? palette.accent.withAlpha (0.22f)
                        : thisCurrent ? palette.accent.withAlpha (0.08f)
+                       : thisSel     ? palette.accent.withAlpha (0.16f)
                                      : palette.text.withAlpha (0.05f));
             g.fillRoundedRectangle (r, 5.0f);
 
-            if (thisCurrent)
+            if (thisPointer)
             {
-                // 播放头唱到的那一句：强调色描边，和右侧歌词同步提示
-                g.setColour (palette.accent.withAlpha (0.85f));
-                g.drawRoundedRectangle (r.expanded (1.2f), 6.0f, 1.3f);
+                // ▶ 打轴指针：下一按空格就写这一句（最强提示）
+                g.setColour (palette.accent);
+                g.drawRoundedRectangle (r.expanded (1.5f), 6.0f, 1.6f);
             }
 
             g.setColour (thisEditing ? palette.accent.withAlpha (0.55f)
+                       : thisPointer ? palette.accent.withAlpha (0.40f)
                        : thisSel     ? palette.accent.withAlpha (0.50f)
                                      : palette.text.withAlpha (0.10f));
             g.drawRoundedRectangle (r, 5.0f, 1.0f);
@@ -3596,10 +3599,26 @@ void LyricSyncEditor::paintTapList (juce::Graphics& g,
             const auto armRect = tapRowArmButton (r);
             const bool thisArmed = (tapArmIndex == li);
 
-            g.setColour (palette.faint);
-            g.setFont (uiFont (9.5f));
-            g.drawText (juce::String (li + 1), ri.removeFromLeft (24),
-                        juce::Justification::centredRight, false);
+            if (thisPointer)
+            {
+                // 指针行：行号位置画 ▶（下一按空格就写这一句），文字从箭头右侧开始
+                const float ty = ri.getY() + ri.getHeight() * 0.5f;
+
+                juce::Path tri;
+                tri.addTriangle (6.0f, ty - 4.5f, 6.0f, ty + 4.5f, 13.0f, ty);
+
+                g.setColour (palette.accent);
+                g.fillPath (tri);
+
+                ri.removeFromLeft (18);
+            }
+            else
+            {
+                g.setColour (palette.faint);
+                g.setFont (uiFont (9.5f));
+                g.drawText (juce::String (li + 1), ri.removeFromLeft (24),
+                            juce::Justification::centredRight, false);
+            }
 
             if (listInSide)
             {
@@ -4395,51 +4414,19 @@ void LyricSyncEditor::timerCallback()
 
     if (tapMode)
     {
-        // 全新歌词（没有原始时间码）：右侧歌词不跟随播放头，
-        // 静止显示打轴指针那一句，打一句走一句（1.9 的打轴方式）
-        if (tapFresh)
-        {
-            currentIndex = tapIndex;
-            displayIndex = static_cast<float> (tapIndex);
-        }
-
-        // 宿主里点时间轴 / 拖播放头时，displayTime 会突然跳一大截，
-        // 而打轴指针只在打点时才动 —— 于是歌词停在上一次打点的位置。
-        // 这里把"与正常推进量差得太多"判为跳转，跟着把指针挪到对应那一句。
-        // （全新打轴时不做这个同步：指针只跟着打点走）
-        if (! tapFresh && tapFollowTime >= 0.0
-            && std::abs ((displayTime - tapFollowTime) - dt) > 0.60)
-            syncTapToPlayhead (displayTime);
+        // 打轴以「指针」为准：右侧大字就是下一句要打的歌词，静止不乱动；
+        // 点列表行 / 点歌词 / 空格打点后指针前进，舞台跟着走到下一句。
+        // 宿主播放头的跳动不再打断打轴节奏（歌曲位置只在列表里用小高亮提示）。
+        currentIndex = tapIndex;
+        displayIndex = static_cast<float> (tapIndex);
 
         tapFollowTime = displayTime;
 
-        // 列表跟随：全新打轴跟「指针」那一行；重打模式跟「正在唱」的那一句
+        // 列表跟随：让指针那一行始终保持在可见窗口里
         // （用户手动滚过列表后暂停几秒，不去抢他的位置）
         if (! tapListDragging
             && juce::Time::getMillisecondCounterHiRes() > tapListHoldUntilMs)
-        {
-            if (tapFresh)
-            {
-                keepTapRowVisible (tapIndex);  // 全新打轴：列表跟着指针走
-            }
-            else
-            {
-                int playingLine = -1;
-
-                for (int i = 0; i < static_cast<int> (tapLines.size()); ++i)
-                {
-                    const double ref = i < static_cast<int> (tapOriginalTimes.size())
-                                         && tapOriginalTimes[(size_t) i] >= 0.0
-                                       ? tapOriginalTimes[(size_t) i] : tapTimes[(size_t) i];
-
-                    if (ref >= 0.0 && ref <= displayTime + 0.001)
-                        playingLine = i;
-                }
-
-                if (playingLine >= 0)
-                    keepTapRowVisible (playingLine);
-            }
-        }
+            keepTapRowVisible (tapIndex);
 
         const auto want = tr (processor.isPlaying.load() ? Lang::TextId::tapHostPause
                                                          : Lang::TextId::tapHostPlay);
@@ -5280,9 +5267,12 @@ void LyricSyncEditor::mouseDown (const juce::MouseEvent& e)
                 return;
             }
 
-            tapListSelected = ids[(size_t) i];   // 单击 = 选中
+            tapListSelected = ids[(size_t) i];   // 单击 = 选中并跳到这一句
+            tapIndex        = ids[(size_t) i];   // 指针跟过去：下一按空格就打这句
+            tapArmIndex     = -1;
             tapListLastClickMs = nowMs;
             tapListHoldUntilMs = nowMs + 2000.0; // 暂停跟随，双击的两次点击之间列表不跑
+            keepTapRowVisible (tapIndex);
             repaint();
             return;
         }
@@ -6597,6 +6587,7 @@ void LyricSyncEditor::undoStamp()
 
     --tapIndex;
     tapTimes[(size_t) tapIndex] = -1.0;
+    keepTapRowVisible (tapIndex);
     repaint();
 }
 
@@ -7021,6 +7012,7 @@ void LyricSyncEditor::armTapLine (int index)
 
     tapArmIndex = index;
     tapEditIndex = -1;
+    tapIndex = index;               // 指针跟到预备的句子：舞台立刻显示它
 
     // 让被预备的那一句出现在列表里
     {

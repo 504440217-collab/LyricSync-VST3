@@ -78,7 +78,7 @@ TABLE = [
     ("tapStart",         "开始打轴", "Tap Timing"),
     ("tapRecordThis",    "记录本句（空格）", "Stamp this line (Space)"),
     ("padLineCounterPrefix", "第 ", "Line "),
-    ("padListHeader", "时间码 · 文字（可直接点改）", "Time · text (click to edit)"),
+    ("padListHeader", "点行跳句 · 双击改 · 空格打点", "Click to jump · dbl-click to edit"),
     ("tapTitle",         "编辑歌词", "EDIT LYRICS"),
     ("tapHint",          "播放到这一句开始时：点击画面空白处，或按空格",
                          "When this line starts: click the stage, or press Space"),
