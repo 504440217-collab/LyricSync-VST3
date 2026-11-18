@@ -17,7 +17,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.6.5";
+    const char* const kVersion = "2.6.6";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -1220,6 +1220,25 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
 void LyricSyncEditor::refreshLookAndFeel()
 {
     styleSidebarControls();
+
+    // 调试用：独立版带 --cast 参数启动时自动开投屏（方便命令行/自动化验证）
+    if (standaloneMode)
+    {
+        if (auto* app = juce::JUCEApplication::getInstance())
+        {
+            if (app->getCommandLineParameters().contains ("--cast"))
+            {
+                juce::Component::SafePointer<LyricSyncEditor> sp (this);
+
+                juce::Timer::callAfterDelay (600, [sp]() mutable
+                {
+                    if (auto* ed = sp.getComponent())
+                        ed->startCast();
+                });
+            }
+        }
+    }
+
 
     auto& l = lookAndFeel;
 
