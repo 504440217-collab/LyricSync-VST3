@@ -410,10 +410,12 @@ function buildRows(){
     // 每行的纵向位置固定：top = 行号 * rowH，永不再改（这是消除跳闪的关键）
     el.style.top=(i*rowH)+'px';
     el.style.height=rowH+'px';
+    // 新建行默认隐藏：只有进入可见窗口的行才由 paint() 显示，避免远处行漏出到上下边缘
+    el.style.visibility='hidden';
     const sps=[];
     for(const ch of lines[i].text){const sp=document.createElement('span');
       sp.textContent=ch;sp.style.color=fg;el.appendChild(sp);sps.push(sp);}
-    track.appendChild(el); rows.push({el:el,spans:sps});
+    track.appendChild(el); rows.push({el:el,spans:sps,shown:false});
   }
 }
 
@@ -462,18 +464,18 @@ function paint(t){
      for(const sp of rows[i].spans) sp.style.color=u;
    }
  }
- // 可见范围内的行逐帧更新字号/透明度（连续函数，无 CSS 过渡）
- const lo=Math.max(0,Math.floor(centerLine)-VIEW-1);
- const hi=Math.min(rows.length-1,Math.ceil(centerLine)+VIEW+1);
- for(let i=lo;i<=hi;i++){
-   const ad=Math.abs(i-centerLine),el=rows[i].el;
-   if(ad>VIEW+0.6){el.style.visibility='hidden';continue;}
-   el.style.visibility='visible';
-   let fs,op;
-   if(ad<=1){fs=fontBase+(nearFont-fontBase)*ad; op=1-0.45*ad;}
-   else{fs=nearFont*Math.max(0.76,1-0.12*(ad-1)); op=Math.max(0.14,0.55-0.16*(ad-1));}
-   el.style.fontSize=fs.toFixed(1)+'px';
-   el.style.opacity=op.toFixed(2);
+ // 逐帧遍历所有行：窗口内显示并按距离算字号/透明度，窗口外一律隐藏。
+ // 必须遍历全部行（不能只遍历窗口附近），否则滑出窗口更远的行会从上下边缘漏出来。
+ for(let i=0;i<rows.length;i++){
+   const ad=Math.abs(i-centerLine),row=rows[i],el=row.el;
+   if(ad<=VIEW+0.6){
+     if(!row.shown){el.style.visibility='visible';row.shown=true;}
+     let fs,op;
+     if(ad<=1){fs=fontBase+(nearFont-fontBase)*ad; op=1-0.45*ad;}
+     else{fs=nearFont*Math.max(0.76,1-0.12*(ad-1)); op=Math.max(0.14,0.55-0.16*(ad-1));}
+     el.style.fontSize=fs.toFixed(1)+'px';
+     el.style.opacity=op.toFixed(2);
+   }else if(row.shown){el.style.visibility='hidden';row.shown=false;}
  }
 
  const row=rows[cur]; if(!row) return;
