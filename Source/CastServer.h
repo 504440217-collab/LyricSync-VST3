@@ -247,17 +247,6 @@ private:
             body = "pong";
             mime = "text/plain; charset=utf-8";
         }
-        else if (path.startsWith ("/hex"))
-        {
-            // 诊断：比较「原始字面量字节」与「经 juce::String 转换后的字节」
-            const char* raw = pageHtml();
-            const char* titleRaw = std::strstr (raw, "<title>");
-            juce::String viaString (titleRaw != nullptr ? titleRaw : raw);
-
-            body = "raw=" + juce::String::toHexString ((const void*) (titleRaw != nullptr ? titleRaw : raw), 32)
-                 + " viaString=" + juce::String::toHexString ((const void*) viaString.toRawUTF8(), 32);
-            mime = "text/plain; charset=utf-8";
-        }
         else if (path.startsWith ("/diag"))
         {
             const int lyricBytes = [this]
@@ -273,7 +262,9 @@ private:
         }
         else
         {
-            body = pageHtml();
+            // 关键：juce::String 的 const char* 构造按 ASCII/Latin-1 处理，
+            // 页面里的中文必须显式声明 UTF-8，否则每个字节被当 Latin-1 → 乱码
+            body = juce::String (juce::CharPointer_UTF8 (pageHtml()));
             mime = "text/html; charset=utf-8";
         }
 
