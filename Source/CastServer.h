@@ -344,12 +344,10 @@ font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;overflow:hi
 #brand{position:fixed;top:16px;left:20px;font-size:14px;color:#8a8a95;letter-spacing:.2px;z-index:2}
 #status{position:fixed;top:16px;right:20px;font-size:12px;color:#8a8a95;z-index:2}
 #lines{position:absolute;top:0;left:0;width:100%;height:100%}
-/* 只有容器整体平移，行自身位置固定 —— 换句不会把各行挤成一团（消除跳闪白条） */
-#track{position:absolute;left:0;top:0;width:100%;will-change:transform;
-transition:transform .30s cubic-bezier(.25,.8,.25,1)}
+/* 平移由 JS 逐帧插值统一驱动（不用 CSS transition —— 手机浏览器会瞬间跳行导致闪） */
+#track{position:absolute;left:0;top:0;width:100%;will-change:transform}
 .ln{position:absolute;left:0;width:100%;display:flex;align-items:center;justify-content:center;
-white-space:nowrap;font-weight:600;overflow:hidden;
-transition:font-size .22s ease,opacity .22s linear}
+white-space:nowrap;font-weight:600;overflow:hidden;font-size:20px;opacity:1}
 .ln span{transition:color .08s linear}
 #empty{position:absolute;top:50%;left:0;width:100%;transform:translateY(-50%);
 text-align:center;font-size:20px;color:#8a8a95;display:none}
@@ -363,6 +361,7 @@ let v=-1,lines=[],rows=[],ok=false,lastCur=-999,needLayout=true;
 let mode=1,fg='#f2f2f4';                 // 逐字/逐句模式 + 未唱基色（来自舞台）
 let anchorT=0,anchorWall=0,playing=0;    // 时间锚点：服务器 t 对应的本地单调时刻
 let fontBase=40,rowH=56,nearFont=24;
+let trackY=0,trackInit=false;            // 容器当前位移（JS 逐帧插值，跨浏览器一致）
 const st=document.getElementById('status');
 const track=document.getElementById('track'),empty=document.getElementById('empty');
 
@@ -379,7 +378,7 @@ window.addEventListener('resize',function(){
   // 尺寸变了要重排每行的固定 top/height（否则滚动位置会错）
   for(let i=0;i<rows.length;i++){rows[i].el.style.top=(i*rowH)+'px';
     rows[i].el.style.height=rowH+'px';}
-  needLayout=true;
+  trackInit=false; needLayout=true;
 });
 metrics();
 
@@ -404,7 +403,7 @@ async function tick(){
 }
 
 function buildRows(){
-  track.textContent=''; rows=[];
+  track.textContent=''; rows=[]; trackInit=false;
   empty.style.display=lines.length?'none':'block';
   for(let i=0;i<lines.length;i++){
     const el=document.createElement('div'); el.className='ln';
@@ -437,28 +436,46 @@ function mix(a,b,t){
 }
 function hex(s){const v=parseInt(s.slice(1),16);return [(v>>16)&255,(v>>8)&255,v&255];}
 
-// 换句只平移容器（整体滚动，绝不重叠）；每帧仅更新当前句演唱进度色
+// 每帧：位置 + 字号 + 透明度全部用同一套 JS 插值连续计算。
+// 不依赖 CSS transition —— 手机浏览器处理 transition 会瞬间跳行，表现为换句"闪一下"。
 function paint(t){
  if(!lines.length) return;
  let cur=-1;
  for(let i=0;i<lines.length;i++) if(lines[i].t<=t+0.02) cur=i;
  if(cur<0) cur=0;                          // 未开播：把第一句当中心，但按进度不着色
+ const H=window.innerHeight;
+ const targetY=H/2-(cur*rowH+rowH/2);
+ // 首次/重建直接到位，之后逐帧插值平滑滚动
+ if(!trackInit){trackY=targetY;trackInit=true;needLayout=true;}
+ else{trackY+=(targetY-trackY)*0.20; if(Math.abs(targetY-trackY)<0.3)trackY=targetY;}
+ track.style.transform='translateY('+trackY.toFixed(1)+'px)';
+
+ // 视觉中心对应的（浮点）行号：字号/透明度按它连续算，滚动过程中平滑过渡
+ const centerLine=(H/2-trackY-rowH/2)/rowH;
+
+ // 换句时把旧当前句恢复成未唱色（当前句每帧由进度色覆盖）
  if(needLayout||cur!==lastCur){
    lastCur=cur; needLayout=false;
-   // 容器平移：让第 cur 行的中心落到视口正中（唯一带 transition 的属性）
-   const H=window.innerHeight;
-   track.style.transform='translateY('+(H/2 - (cur*rowH+rowH/2)).toFixed(1)+'px)';
    for(let i=0;i<rows.length;i++){
-     const d=i-cur,ad=Math.abs(d),row=rows[i],el=row.el;
-     if(ad>VIEW){el.style.opacity='0';el.style.visibility='hidden';continue;}
-     el.style.visibility='visible';
-     // 当前句满字号，其余统一缩小到 nearFont 并按距离再淡出，主次一眼分明
-     el.style.fontSize=(ad===0?fontBase:nearFont*Math.max(0.82,1-0.12*(ad-1))).toFixed(1)+'px';
-     el.style.opacity=String(ad===0?1:Math.max(0.14,0.55-0.16*(ad-1)));
-     if(ad!==0){const u=(lines[i].u)||fg;
-       for(const sp of row.spans) sp.style.color=u;}   // 非当前句：该行未唱色
+     if(i===cur) continue;
+     const u=(lines[i].u)||fg;
+     for(const sp of rows[i].spans) sp.style.color=u;
    }
  }
+ // 可见范围内的行逐帧更新字号/透明度（连续函数，无 CSS 过渡）
+ const lo=Math.max(0,Math.floor(centerLine)-VIEW-1);
+ const hi=Math.min(rows.length-1,Math.ceil(centerLine)+VIEW+1);
+ for(let i=lo;i<=hi;i++){
+   const ad=Math.abs(i-centerLine),el=rows[i].el;
+   if(ad>VIEW+0.6){el.style.visibility='hidden';continue;}
+   el.style.visibility='visible';
+   let fs,op;
+   if(ad<=1){fs=fontBase+(nearFont-fontBase)*ad; op=1-0.45*ad;}
+   else{fs=nearFont*Math.max(0.76,1-0.12*(ad-1)); op=Math.max(0.14,0.55-0.16*(ad-1));}
+   el.style.fontSize=fs.toFixed(1)+'px';
+   el.style.opacity=op.toFixed(2);
+ }
+
  const row=rows[cur]; if(!row) return;
  const L=lines[cur],tint=L.c||fg,unsung=L.u||fg,spans=row.spans,n=spans.length;
  if(mode===0){
