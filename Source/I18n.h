@@ -312,6 +312,8 @@ namespace Lang
         castHint,
         castHint2,
         castFail,
+        castQuit,
+        castPanelHint,
         castSoon,
         fontPx,
         searchResultsEmpty
