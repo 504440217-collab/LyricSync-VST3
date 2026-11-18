@@ -17,7 +17,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.6.12";
+    const char* const kVersion = "2.6.13";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -7417,6 +7417,7 @@ void LyricSyncEditor::startCast()
     castPort = castServer.getPort();
     castUrl  = "http://" + ip + ":" + juce::String (castPort);
     castVersion.store (0);
+    lastCastContent.clear();      // 强制首次重建歌词 JSON
     buildQr();
     lastCastJsonMs = 0.0;         // 让 timerCallback 立刻重建歌词 JSON
     castActive = true;
@@ -7500,8 +7501,10 @@ void LyricSyncEditor::rebuildCastLyrics()
     const auto themeTint = lyricColour();   // 主题歌词色（0=跟随皮肤强调色）
     const auto baseText  = palette.text;    // 未唱字的基色（舞台用 palette.text）
 
-    juce::String j = "{\"v\":" + juce::String (castVersion.load() + 1)
-                   + ",\"lines\":[";
+    // 先生成「不含版本号」的内容部分；内容没变就不递增 v、也不重写 JSON。
+    // 网页只在 v 变化时重建整棵歌词 DOM —— 若每 500ms 无脑 ++v，DOM 会被反复
+    // 销毁重建，表现为持续跳闪。这是关键：v 只跟随内容，不跟随时间。
+    juce::String content = "{\"lines\":[";
 
     for (int i = 0; i < doc.size(); ++i)
     {
@@ -7519,37 +7522,41 @@ void LyricSyncEditor::rebuildCastLyrics()
         const auto unsung = hasTint ? tint.interpolatedWith (baseText, 0.35f)
                                     : baseText;
 
-        j << "{\"t\":" << juce::String (l.time, 3)
-          << ",\"e\":" << juce::String (doc.lineEnd (i), 3)
-          << ",\"c\":\"" << cssHex (tint) << "\""
-          << ",\"u\":\"" << cssHex (unsung) << "\"";
+        content << "{\"t\":" << juce::String (l.time, 3)
+                << ",\"e\":" << juce::String (doc.lineEnd (i), 3)
+                << ",\"c\":\"" << cssHex (tint) << "\""
+                << ",\"u\":\"" << cssHex (unsung) << "\"";
 
         // 逐字时间戳（相对本行起点，秒）；舞台用它做连续扫光
         if (! l.charOffsets.empty())
         {
-            j << ",\"o\":[";
+            content << ",\"o\":[";
             for (size_t k = 0; k < l.charOffsets.size(); ++k)
             {
-                if (k) j << ",";
-                j << juce::String (l.charOffsets[k], 3);
+                if (k) content << ",";
+                content << juce::String (l.charOffsets[k], 3);
             }
-            j << "]";
+            content << "]";
         }
 
-        j << ",\"text\":\"" << escape (l.text) << "\"}";
+        content << ",\"text\":\"" << escape (l.text) << "\"}";
     }
 
-    j << "],\"fg\":\"" << cssHex (baseText) << "\""
-      << ",\"mode\":" << advanceMode << "}";
+    content << "],\"fg\":\"" << cssHex (baseText) << "\""
+            << ",\"mode\":" << advanceMode << "}";
+
+    // 内容签名不变 → 什么都不做（尤其不能 ++v），网页 DOM 保持稳定不重建
+    if (content == lastCastContent)
+        return;
+    lastCastContent = content;
 
     {
-        // 关键修复：必须写入 CastServer 的成员（HTTP 服务读的是 castServer.lyricsJson）。
-        // 之前误写到编辑器自己的 castLyricsJson，服务永远返回空数组 → 网页一直「等待歌词」。
         const juce::ScopedLock sl (castServer.dataLock);
-        castServer.lyricsJson = j;
+        // 把版本号插到最前面：{"v":N, ...content 去掉首个 '{'}
+        castServer.lyricsJson = "{\"v\":" + juce::String (castVersion.load() + 1)
+                              + "," + content.substring (1);
+        castVersion.store (castVersion.load() + 1);
     }
-
-    castVersion.store (castVersion.load() + 1);
 }
 
 juce::Rectangle<float> LyricSyncEditor::castPanelArea() const
