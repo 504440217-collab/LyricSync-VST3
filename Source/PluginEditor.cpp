@@ -687,11 +687,15 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
 
     for (auto* b : { &orientButton, &undoSetStartButton, &logoButton,
                      &closeSettingsButton, &closeAboutButton, &closeSearchButton,
-                     &castCloseButton, &castQuitButton })
+                     &castCloseButton })
     {
         b->addListener (this);
         addAndMakeVisible (*b);
     }
+
+    // 退出投屏是 TextButton（其余关闭键是 IconButton），单独注册
+    castQuitButton.addListener (this);
+    addAndMakeVisible (castQuitButton);
 
     // 逐行 / 逐字：互斥分段开关
     for (auto* b : { &segLineButton, &segWordButton })
