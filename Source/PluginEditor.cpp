@@ -7511,7 +7511,7 @@ void LyricSyncEditor::rebuildCastLyrics()
         const auto& l = doc.line (i);
 
         if (i > 0)
-            j << ",";
+            content << ",";
 
         // 与舞台一致：该行若单独着色就用它，否则用主题歌词色
         const auto tint = lineColourFor (i, themeTint);
