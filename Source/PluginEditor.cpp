@@ -17,7 +17,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.6.9";
+    const char* const kVersion = "2.6.10";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -687,7 +687,7 @@ LyricSyncEditor::LyricSyncEditor (LyricSyncProcessor& owner)
 
     for (auto* b : { &orientButton, &undoSetStartButton, &logoButton,
                      &closeSettingsButton, &closeAboutButton, &closeSearchButton,
-                     &castCloseButton })
+                     &castCloseButton, &castQuitButton })
     {
         b->addListener (this);
         addAndMakeVisible (*b);
@@ -1036,6 +1036,7 @@ void LyricSyncEditor::applyUiText (bool reloadDemoLyrics)
 
     gearButton      .setButtonText (tr (Lang::TextId::settingsTitle));
     castButton      .setButtonText (tr (Lang::TextId::cast));
+    castQuitButton  .setButtonText (tr (Lang::TextId::castQuit));
     fontMinusButton .setButtonText ("A-");
     fontPlusButton  .setButtonText ("A+");
     segLineButton   .setButtonText (tr (Lang::TextId::segLine));
@@ -1433,6 +1434,7 @@ void LyricSyncEditor::updateVisibility()
 
     closeAboutButton.setVisible (aboutOpen);
     castCloseButton.setVisible (castOpen);
+    castQuitButton.setVisible (castOpen);
     logoButton.setVisible (normal && railOpen);   // 点左上角 LOGO 看插件信息
 
     // 旧版弹窗里的搜索控件：内联化之后全部不再显示
@@ -1827,6 +1829,8 @@ void LyricSyncEditor::resized()
         const auto panel = castPanelArea();
         castCloseButton.setBounds (scaledRect (panel.getRight() - 48.0f,
                                                panel.getY() + 10.0f, 36.0f, 36.0f));
+        castQuitButton.setBounds (scaledRect (panel.getCentreX() - 90.0f,
+                                              panel.getBottom() - 44.0f, 180.0f, 32.0f));
     }
 
     const auto stage = stageArea();
@@ -4446,11 +4450,16 @@ void LyricSyncEditor::timerCallback()
             rebuildCastLyrics();   // 内部 castVersion++，并写入 castServer.lyricsJson
         }
 
-        // 状态里的 v 必须与歌词 JSON 里的 v 一致，网页才不会每次 tick 都重复拉歌词
+        // 状态里的 v 必须与歌词 JSON 里的 v 一致，网页才不会每次 tick 都重复拉歌词。
+        // wall = 写入此刻的单调时钟(ms)，p = 是否播放：网页据此做本地插值，
+        // 把「轮询间隔 + 网络往返」造成的滞后压掉，歌词更贴当前演唱句。
         {
             const juce::ScopedLock sl (castServer.dataLock);
-            castServer.stateJson = "{\"t\":" + juce::String (displayTime, 3)
-                                 + ",\"v\":" + juce::String (castVersion.load()) + "}";
+            castServer.stateJson = "{\"t\":" + juce::String (displayTime, 4)
+                                 + ",\"v\":" + juce::String (castVersion.load())
+                                 + ",\"w\":" + juce::String (now, 1)
+                                 + ",\"p\":" + (processor.isPlaying.load() ? "1" : "0")
+                                 + "}";
         }
     }
 
@@ -4730,14 +4739,28 @@ void LyricSyncEditor::buttonClicked (juce::Button* button)
     }
     if (button == &castButton)
     {
-        if (castOpen) stopCast();
-        else          startCast();
+        // 服务已在运行：投屏按钮只切换二维码面板显示，不中断投屏
+        if (castActive)
+        {
+            castOpen = ! castOpen;
+            updateVisibility();
+            resized();
+            repaint();
+        }
+        else
+            startCast();
         return;
     }
 
     if (button == &castCloseButton)
     {
-        stopCast();
+        hideCastPanel();   // × 只收起面板，投屏继续在后台运行
+        return;
+    }
+
+    if (button == &castQuitButton)
+    {
+        stopCast();        // 退出投屏：真正停止服务
         return;
     }
     if (button == &fontMinusButton)     { fontStep (-5); return; }
@@ -7392,7 +7415,8 @@ void LyricSyncEditor::startCast()
     castVersion.store (0);
     buildQr();
     lastCastJsonMs = 0.0;         // 让 timerCallback 立刻重建歌词 JSON
-    castOpen = true;
+    castActive = true;
+    castOpen   = true;
     updateVisibility();
     resized();
     repaint();
@@ -7401,6 +7425,16 @@ void LyricSyncEditor::startCast()
 void LyricSyncEditor::stopCast()
 {
     castServer.stop();
+    castActive = false;
+    castOpen   = false;
+    updateVisibility();
+    resized();
+    repaint();
+}
+
+void LyricSyncEditor::hideCastPanel()
+{
+    // 只收起二维码面板：服务、URL、歌词推送全部照常，投屏不中断
     castOpen = false;
     updateVisibility();
     resized();
@@ -7453,7 +7487,17 @@ void LyricSyncEditor::rebuildCastLyrics()
         return out;
     };
 
-    juce::String j = "{\"v\":" + juce::String (castVersion.load() + 1) + ",\"lines\":[";
+    // 把 juce::Colour 转成 CSS #RRGGBB（投屏页与舞台用同一套颜色）
+    static auto cssHex = [] (juce::Colour c)
+    {
+        return "#" + c.toDisplayString (false);
+    };
+
+    const auto themeTint = lyricColour();   // 主题歌词色（0=跟随皮肤强调色）
+    const auto baseText  = palette.text;    // 未唱字的基色（舞台用 palette.text）
+
+    juce::String j = "{\"v\":" + juce::String (castVersion.load() + 1)
+                   + ",\"lines\":[";
 
     for (int i = 0; i < doc.size(); ++i)
     {
@@ -7462,11 +7506,37 @@ void LyricSyncEditor::rebuildCastLyrics()
         if (i > 0)
             j << ",";
 
+        // 与舞台一致：该行若单独着色就用它，否则用主题歌词色
+        const auto tint = lineColourFor (i, themeTint);
+        const auto styleIt = lineStyles.find (i);
+        const bool hasTint = (styleIt != lineStyles.end()
+                              && styleIt->second.colourIndex >= 0);
+        // 舞台逐字模式：单独着色的行，未唱字用该色与基色的浅插值
+        const auto unsung = hasTint ? tint.interpolatedWith (baseText, 0.35f)
+                                    : baseText;
+
         j << "{\"t\":" << juce::String (l.time, 3)
-          << ",\"text\":\"" << escape (l.text) << "\"}";
+          << ",\"e\":" << juce::String (doc.lineEnd (i), 3)
+          << ",\"c\":\"" << cssHex (tint) << "\""
+          << ",\"u\":\"" << cssHex (unsung) << "\"";
+
+        // 逐字时间戳（相对本行起点，秒）；舞台用它做连续扫光
+        if (! l.charOffsets.empty())
+        {
+            j << ",\"o\":[";
+            for (size_t k = 0; k < l.charOffsets.size(); ++k)
+            {
+                if (k) j << ",";
+                j << juce::String (l.charOffsets[k], 3);
+            }
+            j << "]";
+        }
+
+        j << ",\"text\":\"" << escape (l.text) << "\"}";
     }
 
-    j << "]}";
+    j << "],\"fg\":\"" << cssHex (baseText) << "\""
+      << ",\"mode\":" << advanceMode << "}";
 
     {
         // 关键修复：必须写入 CastServer 的成员（HTTP 服务读的是 castServer.lyricsJson）。
@@ -7480,7 +7550,7 @@ void LyricSyncEditor::rebuildCastLyrics()
 
 juce::Rectangle<float> LyricSyncEditor::castPanelArea() const
 {
-    const float w = 480.0f, hgt = 430.0f;
+    const float w = 480.0f, hgt = 462.0f;
     return { juce::jmax (16.0f, (baseW() - w) * 0.5f),
              juce::jmax (16.0f, (baseH() - hgt) * 0.5f - 20.0f), w, hgt };
 }
@@ -7541,9 +7611,9 @@ void LyricSyncEditor::paintCast (juce::Graphics& g)
                 panel.getX() + 20, panel.getY() + 350,
                 (int) panel.getWidth() - 40, 18, juce::Justification::centred, false);
 
-    g.drawText (tr (Lang::TextId::castHint2),
-                panel.getX() + 20, panel.getY() + 372,
-                (int) panel.getWidth() - 40, 18, juce::Justification::centred, false);
+    g.drawText (tr (Lang::TextId::castPanelHint),
+                panel.getX() + 20, panel.getY() + 396,
+                (int) panel.getWidth() - 40, 30, juce::Justification::centred, false);
 }
 
 void LyricSyncEditor::toggleHostTransport()
