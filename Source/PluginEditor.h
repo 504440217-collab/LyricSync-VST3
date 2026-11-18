@@ -482,7 +482,8 @@ private:
     juce::CriticalSection castLock;         // 保护 castLyricsJson
     juce::String       castLyricsJson;      // 服务线程读的歌词 JSON
     juce::String       castUrl;             // http://<LAN-IP>:<端口>
-    bool               castOpen   = false;  // 投屏面板是否打开（服务是否运行）
+    bool               castActive = false;  // 投屏服务是否正在运行（与面板显示解耦）
+    bool               castOpen   = false;  // 投屏二维码面板是否显示（× 只关面板，不停服务）
     int                castPort   = 0;
     int                castQrSize = 0;      // QR 模块边长（0 = 未生成）
     std::vector<bool>  castQrModules;
@@ -491,6 +492,7 @@ private:
     
     void startCast();
     void stopCast();
+    void hideCastPanel();          // 只收起二维码面板，投屏服务继续运行
     void buildQr();
     void rebuildCastLyrics();
     juce::Rectangle<float> castPanelArea() const;
@@ -553,7 +555,8 @@ private:
     juce::TextButton  tapPauseButton;
     juce::TextButton  tapHostTransportButton;   // 同步宿主播放/暂停
     juce::TextButton  tapRestampAllButton;            // 重打全部：整首时间轴归零从头打
-    IconButton        castCloseButton  { IconButton::Icon::close };   // 投屏面板关闭
+    IconButton        castCloseButton  { IconButton::Icon::close };   // 投屏面板收起（不停服务）
+    juce::TextButton  castQuitButton;        // 退出投屏（真正停止服务）
     juce::TextButton  tapRowRestampButton;
     juce::TextButton  tapRowApplyButton;
     juce::TextButton  tapRowCancelButton;
