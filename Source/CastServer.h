@@ -344,32 +344,43 @@ font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;overflow:hi
 #brand{position:fixed;top:16px;left:20px;font-size:14px;color:#8a8a95;letter-spacing:.2px;z-index:2}
 #status{position:fixed;top:16px;right:20px;font-size:12px;color:#8a8a95;z-index:2}
 #lines{position:absolute;top:0;left:0;width:100%;height:100%}
-.ln{position:absolute;top:50%;left:0;width:100%;text-align:center;white-space:nowrap;
-font-weight:600;line-height:1.2;overflow:hidden;text-overflow:ellipsis;
-transform-origin:center center;will-change:transform,opacity;
-transition:transform .28s cubic-bezier(.22,.61,.36,1),opacity .28s linear,font-size .28s}
+/* 只有容器整体平移，行自身位置固定 —— 换句不会把各行挤成一团（消除跳闪白条） */
+#track{position:absolute;left:0;top:0;width:100%;will-change:transform;
+transition:transform .30s cubic-bezier(.25,.8,.25,1)}
+.ln{position:absolute;left:0;width:100%;display:flex;align-items:center;justify-content:center;
+white-space:nowrap;font-weight:600;overflow:hidden;
+transition:font-size .22s ease,opacity .22s linear}
 .ln span{transition:color .08s linear}
 #empty{position:absolute;top:50%;left:0;width:100%;transform:translateY(-50%);
 text-align:center;font-size:20px;color:#8a8a95;display:none}
 </style></head><body>
 <div id="brand">&#9679; LyricSync</div>
 <div id="status">连接中…</div>
-<div id="lines"></div><div id="empty">等待歌词…</div>
+<div id="lines"><div id="track"></div></div><div id="empty">等待歌词…</div>
 <script>
 const VIEW=3;                            // 当前句上下各显示几行（共 2*VIEW+1 行）
 let v=-1,lines=[],rows=[],ok=false,lastCur=-999,needLayout=true;
 let mode=1,fg='#f2f2f4';                 // 逐字/逐句模式 + 未唱基色（来自舞台）
 let anchorT=0,anchorWall=0,playing=0;    // 时间锚点：服务器 t 对应的本地单调时刻
-let fontBase=40,rowH=56;
+let fontBase=40,rowH=56,nearFont=24;
 const st=document.getElementById('status');
-const box=document.getElementById('lines'),empty=document.getElementById('empty');
+const track=document.getElementById('track'),empty=document.getElementById('empty');
 
 function metrics(){
   const W=window.innerWidth,H=window.innerHeight;
-  fontBase=Math.max(20,Math.min(60,Math.min(W*0.072,H*0.075)));
-  rowH=fontBase*1.4;
+  // 当前句明显大：其它句缩到约 55%，一眼区分、不会看错行
+  fontBase=Math.max(26,Math.min(64,Math.min(W*0.085,H*0.085)));
+  nearFont=fontBase*0.55;
+  // 行距按「当前句大字号」留足，避免上下行贴脸；再收紧到屏幕能放下 7 行
+  rowH=Math.max(fontBase*1.15,Math.min(H/7.4,fontBase*1.7));
 }
-window.addEventListener('resize',function(){metrics();needLayout=true;});
+window.addEventListener('resize',function(){
+  metrics();
+  // 尺寸变了要重排每行的固定 top/height（否则滚动位置会错）
+  for(let i=0;i<rows.length;i++){rows[i].el.style.top=(i*rowH)+'px';
+    rows[i].el.style.height=rowH+'px';}
+  needLayout=true;
+});
 metrics();
 
 // 用锚点 + 本地经过时间推算「此刻」的播放秒数：轮询间隔内平滑推进，不滞后
@@ -393,14 +404,17 @@ async function tick(){
 }
 
 function buildRows(){
-  box.textContent=''; rows=[];
+  track.textContent=''; rows=[];
   empty.style.display=lines.length?'none':'block';
   for(let i=0;i<lines.length;i++){
     const el=document.createElement('div'); el.className='ln';
+    // 每行的纵向位置固定：top = 行号 * rowH，永不再改（这是消除跳闪的关键）
+    el.style.top=(i*rowH)+'px';
+    el.style.height=rowH+'px';
     const sps=[];
     for(const ch of lines[i].text){const sp=document.createElement('span');
       sp.textContent=ch;sp.style.color=fg;el.appendChild(sp);sps.push(sp);}
-    box.appendChild(el); rows.push({el:el,spans:sps});
+    track.appendChild(el); rows.push({el:el,spans:sps});
   }
 }
 
@@ -423,7 +437,7 @@ function mix(a,b,t){
 }
 function hex(s){const v=parseInt(s.slice(1),16);return [(v>>16)&255,(v>>8)&255,v&255];}
 
-// 只在换句/尺寸变化时重排位置与静态色；每帧仅更新当前句的演唱进度色
+// 换句只平移容器（整体滚动，绝不重叠）；每帧仅更新当前句演唱进度色
 function paint(t){
  if(!lines.length) return;
  let cur=-1;
@@ -431,15 +445,18 @@ function paint(t){
  if(cur<0) cur=0;                          // 未开播：把第一句当中心，但按进度不着色
  if(needLayout||cur!==lastCur){
    lastCur=cur; needLayout=false;
+   // 容器平移：让第 cur 行的中心落到视口正中（唯一带 transition 的属性）
+   const H=window.innerHeight;
+   track.style.transform='translateY('+(H/2 - (cur*rowH+rowH/2)).toFixed(1)+'px)';
    for(let i=0;i<rows.length;i++){
      const d=i-cur,ad=Math.abs(d),row=rows[i],el=row.el;
      if(ad>VIEW){el.style.opacity='0';el.style.visibility='hidden';continue;}
      el.style.visibility='visible';
-     el.style.opacity=String(Math.max(0.16,1-0.28*ad));
-     el.style.fontSize=(fontBase*Math.max(0.5,1-0.18*ad)).toFixed(1)+'px';
-     el.style.transform='translateY(calc(-50% + '+(d*rowH).toFixed(1)+'px))';
-     const u=(lines[i].u)||fg;
-     for(const sp of row.spans) sp.style.color=u;   // 非当前句：该行未唱色
+     // 当前句满字号，其余统一缩小到 nearFont 并按距离再淡出，主次一眼分明
+     el.style.fontSize=(ad===0?fontBase:nearFont*Math.max(0.82,1-0.12*(ad-1))).toFixed(1)+'px';
+     el.style.opacity=String(ad===0?1:Math.max(0.14,0.55-0.16*(ad-1)));
+     if(ad!==0){const u=(lines[i].u)||fg;
+       for(const sp of row.spans) sp.style.color=u;}   // 非当前句：该行未唱色
    }
  }
  const row=rows[cur]; if(!row) return;
