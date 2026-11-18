@@ -12,9 +12,10 @@
 /**
  *  极简 HTTP 服务：为「局域网网页投屏」提供三个接口。
  *
- *  GET /        → 投屏网页（深色歌词页，逐字高亮，内置轮询脚本）
- *  GET /state   → {"t":<播放秒数>,"v":<歌词版本>}（页面 120ms 轮询一次）
- *  GET /lyrics  → {"v":<版本>,"lines":[{"t":<开始秒>,"text":".."},..]}
+ *  GET /        → 投屏网页（深色歌词页，颜色/逐字逐句与舞台一致，rAF 本地插值）
+ *  GET /state   → {"t":<播放秒数>,"v":<版本>,"w":<写入时钟>,"p":<播放0/1>}
+ *  GET /lyrics  → {"v":<版本>,"fg":<未唱基色>,"mode":<0逐句/1逐字>,
+ *                  "lines":[{"t":"e":"c":"u":"o":[逐字偏移],"text":".."},..]}
  *
  *  数据由编辑器（GUI 线程）在 dataLock 保护下写入 stateJson / lyricsJson，
  *  服务线程只读拷贝，互不越界。每个请求一个短连接，浏览器端自行重连。
@@ -341,64 +342,99 @@ body{margin:0;height:100vh;background:#08080a;color:#a1a1aa;
 font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
 display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
 #brand{position:fixed;top:16px;left:20px;font-size:14px;color:#8a8a95;letter-spacing:.2px}
-#prev,#next{font-size:24px;color:#6e6e78;margin:18px 0;max-width:90vw;text-align:center;
-white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#prev,#next{font-size:24px;color:#5a5a63;margin:18px 0;max-width:90vw;text-align:center;
+white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .25s}
 #status{position:fixed;top:16px;right:20px;font-size:12px;color:#8a8a95}
-#cur{font-size:7vw;font-weight:600;color:#9a9aa5;margin:24px 0;max-width:92vw;
+#cur{font-size:7vw;font-weight:600;margin:24px 0;max-width:92vw;
 text-align:center;line-height:1.5}
-#cur span.on{color:#f2f2f4}
+#cur span{transition:color .06s linear}
 </style></head><body><div id="brand">&#9679; LyricSync</div>
 <div id="status">连接中…</div>
 <div id="prev"></div><div id="cur"></div><div id="next"></div>
 <script>
 let v=-1,lines=[],pi=-2,ok=false;
+let mode=1,fg='#f2f2f4';                 // 逐字/逐句模式 + 未唱基色（来自舞台）
+let anchorT=0,anchorWall=0,playing=0;    // 时间锚点：服务器 t 对应的本地单调时刻
 const st=document.getElementById('status');
+const el=document.getElementById('cur'),pv=document.getElementById('prev'),nx=document.getElementById('next');
+
+// 用锚点 + 本地经过时间推算「此刻」的播放秒数：轮询间隔内平滑推进，不滞后
+function nowT(){
+  return playing ? anchorT+(performance.now()-anchorWall)/1000 : anchorT;
+}
 async function tick(){
  try{
-  const s=await (await fetch('/state')).json();
+  const r=await fetch('/state');const s=await r.json();
   if(!ok){ok=true;st.textContent='已连接宿主';}
-  if(s.v!==v){v=s.v;const d=await (await fetch('/lyrics')).json();lines=d.lines||[];
-    st.textContent='已连接宿主 · '+lines.length+' 句歌词';}
-  render(s.t);
+  if(s.v!==v){
+    v=s.v;
+    const d=await (await fetch('/lyrics')).json();
+    lines=d.lines||[]; mode=(typeof d.mode==='number')?d.mode:1; fg=d.fg||'#f2f2f4';
+    st.textContent='已连接宿主 · '+lines.length+' 句歌词';
+    pi=-2;                                // 强制下一帧重建 DOM（模式/颜色可能变了）
+  }
+  // 收到新状态就重新校准锚点；暂停时用服务器 t 原样，不本地推进
+  anchorT=s.t; anchorWall=performance.now(); playing=s.p?1:0;
  }catch(e){ok=false;st.textContent='连接断开，正在重试…';}
- setTimeout(tick,120);
+ setTimeout(tick,60);
 }
-function render(t){
- const el=document.getElementById('cur'),pv=document.getElementById('prev'),
-       nx=document.getElementById('next');
+
+// 复刻舞台 sungProgressAt：返回「已唱到第几个字」的连续浮点；无逐字时间戳返回 -1
+function sungProgress(l,t){
+ const o=l.o; if(!o||!o.length||!l.text.length) return -1;
+ const rel=t-l.t; let count=0;
+ for(const off of o){ if(rel>=off) ++count; else break; }
+ if(count<=0) return rel<0?-1:0;
+ const idx=count-1, start=o[idx];
+ const end=(idx+1<o.length)?o[idx+1]:start+0.4;
+ const span=Math.max(0.02,end-start);
+ return idx+Math.max(0,Math.min(1,(rel-start)/span));
+}
+
+function paintLine(t){
  let cur=-1;
  for(let i=0;i<lines.length;i++) if(lines[i].t<=t+0.02) cur=i;
  if(cur<0){
   if(lines.length){
-   // 还没开播：直接显示第一句（灰字），播放到它时逐字点亮
-   el.innerHTML='';
-   for(const ch of lines[0].text){
-    const sp=document.createElement('span');sp.textContent=ch;el.appendChild(sp);
-   }
-   pv.textContent='';
-   nx.textContent=lines.length>1?lines[1].text:'';
+   if(pi!==-2||el.firstChild===null){pi=-2;el.textContent='';
+    const u0=lines[0].u||fg;
+    for(const ch of lines[0].text){const sp=document.createElement('span');
+     sp.textContent=ch;sp.style.color=u0;el.appendChild(sp);}}
+   pv.textContent=''; nx.textContent=lines.length>1?lines[1].text:'';
+   nx.style.color=fg;
    st.textContent='等待播放开始 · 共 '+lines.length+' 句';
-  }else{
-   el.textContent='等待歌词…';
-  }
+  }else{ el.textContent='等待歌词…'; }
   return;
  }
+ const L=lines[cur], tint=L.c||fg, unsung=L.u||fg;
  if(cur!==pi){
-  pi=cur;
-  el.innerHTML='';
-  for(const ch of lines[cur].text){
-   const sp=document.createElement('span');sp.textContent=ch;el.appendChild(sp);
-  }
+  pi=cur; el.textContent='';
+  for(const ch of L.text){const sp=document.createElement('span');
+   sp.textContent=ch;sp.style.color=unsung;el.appendChild(sp);}
   pv.textContent=cur>0?lines[cur-1].text:'';
   nx.textContent=cur+1<lines.length?lines[cur+1].text:'';
  }
- const end=cur+1<lines.length?lines[cur+1].t:lines[cur].t+4;
- let p=(t-lines[cur].t)/Math.max(0.001,end-lines[cur].t);
- p=Math.max(0,Math.min(1,p));
- const spans=el.children,n=spans.length,k=Math.floor(p*n);
- for(let i=0;i<n;i++)spans[i].className=(i<k||p>=1)?'on':'';
+ const spans=el.children,n=spans.length;
+ if(mode===0){
+   // 逐句：和舞台一致——换句后整行在约 0.2s 内由未唱色渐变为行色
+   const p=Math.max(0,Math.min(1,(t-L.t)/0.22));
+   for(let i=0;i<n;i++)spans[i].style.color=p>=1?tint:mix(unsung,tint,p);
+ }else{
+   // 逐字：每个字按 charOffsets（或行时长线性）依次点亮，未唱用该行未唱色
+   let sung=sungProgress(L,t);
+   if(sung<0) sung=Math.max(0,Math.min(1,(t-L.t)/Math.max(0.05,L.e-L.t)))*n;
+   for(let i=0;i<n;i++) spans[i].style.color=(i<sung)?tint:unsung;
+ }
 }
-tick();
+function mix(a,b,t){
+ const pa=hex(a),pb=hex(b);
+ return 'rgb('+Math.round(pa[0]+(pb[0]-pa[0])*t)+','+
+                Math.round(pa[1]+(pb[1]-pa[1])*t)+','+
+                Math.round(pa[2]+(pb[2]-pa[2])*t)+')';
+}
+function hex(s){const v=parseInt(s.slice(1),16);return [(v>>16)&255,(v>>8)&255,v&255];}
+function frame(){ paintLine(nowT()); requestAnimationFrame(frame); }
+tick(); requestAnimationFrame(frame);
 </script></body></html>)HTML";
     }
 
