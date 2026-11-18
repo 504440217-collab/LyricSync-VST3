@@ -488,6 +488,7 @@ private:
     int                castQrSize = 0;      // QR 模块边长（0 = 未生成）
     std::vector<bool>  castQrModules;
     double             lastCastJsonMs = 0.0;
+    juce::String       lastCastContent;    // 上次歌词内容签名：不变则不递增 v（防 DOM 反复重建跳闪）
     std::atomic<int>   castVersion { 0 };
     
     void startCast();
