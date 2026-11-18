@@ -215,10 +215,17 @@ private:
 
         // "GET /path HTTP/1.1"
         const int sp1 = head.indexOfChar (' ');
-        const int sp2 = head.indexOfChar (' ', sp1 + 1);
+        // 注意 JUCE 的两参重载是 (startIndex, characterToFind) —— 顺序不能写反！
+        const int sp2 = head.indexOfChar (sp1 + 1, ' ');
 
         if (sp1 < 0 || sp2 <= sp1)
+        {
+            juce::File::getSpecialLocation (juce::File::tempDirectory)
+                .getChildFile ("LyricSync-cast.log")
+                .appendText ("bad request line: sp1=" + juce::String (sp1)
+                             + " sp2=" + juce::String (sp2) + "\r\n", false, false, "\r\n");
             return;
+        }
 
         const juce::String path = head.substring (sp1 + 1, sp2);
 
