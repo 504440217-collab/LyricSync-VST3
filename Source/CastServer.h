@@ -247,6 +247,17 @@ private:
             body = "pong";
             mime = "text/plain; charset=utf-8";
         }
+        else if (path.startsWith ("/hex"))
+        {
+            // 诊断：比较「原始字面量字节」与「经 juce::String 转换后的字节」
+            const char* raw = pageHtml();
+            const char* titleRaw = std::strstr (raw, "<title>");
+            juce::String viaString (titleRaw != nullptr ? titleRaw : raw);
+
+            body = "raw=" + juce::String::toHexString ((const void*) (titleRaw != nullptr ? titleRaw : raw), 32)
+                 + " viaString=" + juce::String::toHexString ((const void*) viaString.toRawUTF8(), 32);
+            mime = "text/plain; charset=utf-8";
+        }
         else if (path.startsWith ("/diag"))
         {
             const int lyricBytes = [this]
