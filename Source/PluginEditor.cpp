@@ -17,7 +17,7 @@
 
 namespace
 {
-    const char* const kVersion = "2.6.8";
+    const char* const kVersion = "2.6.9";
 
     // 常见字体（Windows 自带或系统常见），显示名直接用字体名，跨语言一致。
     // 只放含汉字的字体：以前放了 Segoe UI / Arial，选中后所有中文变成方块，
@@ -4440,16 +4440,17 @@ void LyricSyncEditor::timerCallback()
     // 投屏开启时：状态每帧刷新；歌词数据每 500ms 重建（版本号+1 让网页重新拉取）
     if (castServer.isRunning())
     {
+        if (now - lastCastJsonMs > 500.0)
+        {
+            lastCastJsonMs = now;
+            rebuildCastLyrics();   // 内部 castVersion++，并写入 castServer.lyricsJson
+        }
+
+        // 状态里的 v 必须与歌词 JSON 里的 v 一致，网页才不会每次 tick 都重复拉歌词
         {
             const juce::ScopedLock sl (castServer.dataLock);
             castServer.stateJson = "{\"t\":" + juce::String (displayTime, 3)
                                  + ",\"v\":" + juce::String (castVersion.load()) + "}";
-        }
-
-        if (now - lastCastJsonMs > 500.0)
-        {
-            lastCastJsonMs = now;
-            rebuildCastLyrics();
         }
     }
 
@@ -7468,8 +7469,10 @@ void LyricSyncEditor::rebuildCastLyrics()
     j << "]}";
 
     {
+        // 关键修复：必须写入 CastServer 的成员（HTTP 服务读的是 castServer.lyricsJson）。
+        // 之前误写到编辑器自己的 castLyricsJson，服务永远返回空数组 → 网页一直「等待歌词」。
         const juce::ScopedLock sl (castServer.dataLock);
-        castLyricsJson = j;
+        castServer.lyricsJson = j;
     }
 
     castVersion.store (castVersion.load() + 1);
