@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(LyricSync VERSION 2.6.14 LANGUAGES CXX C)
+project(LyricSync VERSION 2.6.15 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
